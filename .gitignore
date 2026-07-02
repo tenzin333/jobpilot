@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Secrets & local runtime config
+.env
+/config/preferences.yaml
+
+# SQLite database (+ WAL/SHM sidecars)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# User data: résumés, generated résumé/cover PDFs, artifacts
+/data/
+
+# Assisted co-browse browser profile (cookies/logins, ~30MB)
+.assist_profile/
+
+# Server log dumps / scratch
+*.log
+/e2.txt
+/o2.txt
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

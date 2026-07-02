@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: Letter; margin: 1in; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; font-size: 11pt; line-height: 1.5; }
+  .header { margin-bottom: 24px; }
+  .header .name { font-size: 14pt; font-weight: bold; }
+  .meta { color: #444; font-size: 10pt; }
+  .body p { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="name">{{ profile.full_name or "Candidate" }}</div>
+    <div class="meta">{{ profile.email }}{% if profile.phone %} &middot; {{ profile.phone }}{% endif %}</div>
+  </div>
+  <div class="meta" style="margin-bottom:18px;">Re: {{ job.title }} at {{ job.company }}</div>
+  <div class="body">
+    <p>{{ tailored.cover_letter }}</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,96 @@
+# Copy to config/preferences.yaml and edit. Editable from the dashboard Setup page.
+
+# Roles you want, most-preferred first. Used by ranking.
+desired_roles:
+  - "Senior Software Engineer"
+  - "Backend Engineer"
+  - "Platform Engineer"
+
+# Acceptable locations (city / region / country). Use "Remote" for remote-only.
+locations:
+  - "Remote"
+  - "San Francisco, CA"
+  - "New York, NY"
+
+# remote preference: one of "remote_only", "hybrid_ok", "onsite_ok", "any"
+remote_preference: "hybrid_ok"
+
+# Titles containing any of these whole words are dropped at discovery.
+# Use it to filter out seniority levels above your target or off-domain roles.
+exclude_keywords:
+  - "senior"
+  - "staff"
+  - "principal"
+  - "lead"
+  - "director"
+  - "manager"
+  - "architect"
+  - "intern"
+
+# Minimum acceptable base salary (annual, in salary_currency). null = no floor.
+min_salary: 150000
+salary_currency: "USD"
+
+# Visa / work authorization.
+# require_sponsorship: true means you NEED the employer to sponsor.
+# If true, jobs that explicitly say "no sponsorship" are hard-filtered out.
+require_sponsorship: false
+work_authorization: "US Citizen"
+
+# Sources to discover from. Each entry: ats type + company slug used by that ATS.
+# Greenhouse slug: the {company} in boards-api.greenhouse.io/v1/boards/{company}/jobs
+# Lever slug: the {company} in api.lever.co/v0/postings/{company}
+sources:
+  greenhouse:
+    enabled: true
+    autonomy: true        # allow auto-submit for this source
+    companies:
+      - "stripe"
+      - "airbnb"
+  lever:
+    enabled: true
+    autonomy: true
+    companies:
+      - "mistral"
+  ashby:                  # public API; popular with AI startups
+    enabled: true
+    autonomy: true
+    companies:
+      - "openai"
+      - "cursor"
+      - "notion"
+  workable:               # public API
+    enabled: false
+    autonomy: true
+    companies:
+      - "huggingface"
+  smartrecruiters:        # public API; add SmartRecruiters company slugs to use
+    enabled: false
+    autonomy: true
+    companies: []
+  # --- Keyword-search aggregators (query your desired_roles; apply links are
+  # external, so these route to the intervention queue, not auto-submit). ---
+  themuse:
+    enabled: true
+    autonomy: false
+    categories:           # optional; valid Muse names. Defaults to SWE/IT/Data if empty
+      - "Software Engineering"
+      - "Computer and IT"
+      - "Data and Analytics"
+    max_pages: 1
+  remotive:
+    enabled: true         # remote-only board; free-text search on desired_roles
+    autonomy: false
+  adzuna:
+    enabled: false        # set ADZUNA_APP_ID/ADZUNA_APP_KEY in .env to enable
+    autonomy: false
+    max_pages: 1
+
+  career_pages:
+    enabled: false        # opt-in, brittle; submissions route to needs_human
+    autonomy: false
+    sites:
+      # - url: "https://example.com/careers"
+      #   link_selector: "a.job-link"   # CSS selector for job links
+      #   keyword: "engineer"           # optional filter on link text/href
+      []

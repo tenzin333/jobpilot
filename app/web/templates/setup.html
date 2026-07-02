@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Setup — Job Applier Agent{% endblock %}
+{% block content %}
+<h1>Setup</h1>
+
+{% if profile %}
+<section class="card" style="margin-bottom:1rem;">
+  <strong>Current profile</strong>
+  <div>{{ profile.full_name or "(name not parsed)" }} &middot; {{ profile.email or "(no email)" }}</div>
+  <div>{{ profile.skills | length }} skills &middot; {{ profile.experience | length }} roles &middot; {{ profile.education | length }} education entries</div>
+  <div class="badge">resume: {{ profile.base_resume_path.split('\\')[-1] if profile.base_resume_path else "none" }}</div>
+</section>
+{% endif %}
+
+<form method="post" action="/setup" enctype="multipart/form-data">
+  <h2>Base resume</h2>
+  <label>Upload resume (.pdf or .docx)</label>
+  <input type="file" name="resume" accept=".pdf,.docx">
+
+  <h2>Preferences</h2>
+  <label>Desired roles (one per line)</label>
+  <textarea name="desired_roles" rows="3">{{ prefs.desired_roles | join("\n") }}</textarea>
+
+  <label>Locations (one per line; use "Remote")</label>
+  <textarea name="locations" rows="3">{{ prefs.locations | join("\n") }}</textarea>
+
+  <label>Remote preference</label>
+  <select name="remote_preference">
+    {% for opt in remote_options %}
+    <option value="{{ opt }}" {{ "selected" if prefs.remote_preference.value == opt else "" }}>{{ opt }}</option>
+    {% endfor %}
+  </select>
+
+  <label>Minimum salary</label>
+  <input type="number" name="min_salary" value="{{ prefs.min_salary if prefs.min_salary is not none else '' }}">
+
+  <label>Salary currency</label>
+  <input type="text" name="salary_currency" value="{{ prefs.salary_currency }}">
+
+  <label><input type="checkbox" name="require_sponsorship" {{ "checked" if prefs.require_sponsorship else "" }}> I require visa sponsorship</label>
+
+  <label>Work authorization</label>
+  <input type="text" name="work_authorization" value="{{ prefs.work_authorization }}">
+
+  <h2>Application answers</h2>
+  <p class="muted">Auto-filled from your CV; missing fields show defaults you can overwrite.
+  These fill in application forms.</p>
+  <label>LinkedIn URL</label>
+  <input type="text" name="linkedin_url" value="{{ bank.get('linkedin', '') }}">
+  <label>GitHub URL</label>
+  <input type="text" name="github_url" value="{{ bank.get('github', '') }}">
+  <label>Portfolio / website</label>
+  <input type="text" name="portfolio_url" value="{{ bank.get('portfolio', '') }}">
+  <label>Current location</label>
+  <input type="text" name="current_location" value="{{ bank.get('current_location', '') }}">
+  <label>Years of experience</label>
+  <input type="text" name="years_experience" value="{{ bank.get('years_experience', '') }}">
+  <label>Salary expectation</label>
+  <input type="text" name="salary_expectation" value="{{ bank.get('salary_expectation', '') }}">
+  <label>Current / previous employer</label>
+  <input type="text" name="current_employer" value="{{ bank.get('current_employer', '') }}">
+  <label>Current / previous job title</label>
+  <input type="text" name="current_title" value="{{ bank.get('current_title', '') }}">
+  <label>Additional answers (one per line, <code>question: answer</code>)</label>
+  <textarea name="additional_answers" rows="6">{{ extra_answers }}</textarea>
+
+  <h2>Sources</h2>
+  <label>Greenhouse company slugs (one per line)</label>
+  <textarea name="greenhouse_companies" rows="3">{{ gh.companies | join("\n") }}</textarea>
+
+  <label>Lever company slugs (one per line)</label>
+  <textarea name="lever_companies" rows="3">{{ lever.companies | join("\n") }}</textarea>
+
+  <p style="margin-top:1rem;"><button type="submit">Save</button></p>
+</form>
+{% endblock %}

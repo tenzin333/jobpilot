@@ -1,0 +1,34 @@
+<div id="jobs-grid"
+     {% if running %}hx-get="/jobs/grid" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+{% if rows %}
+<div class="match-grid">
+  {% for job, app in rows %}
+  <div class="match-card">
+    <div class="score" title="match score">
+      {% if app and app.match_score is not none %}{{ app.match_score }}
+      {% elif running %}<span class="spinner"></span>
+      {% else %}—{% endif %}
+    </div>
+    <div class="info">
+      <strong>{{ job.title }}</strong>
+      <div class="muted">{{ job.company }} &middot; {{ job.location or "—" }} &middot; <span class="badge">{{ job.source }}</span>{% if job.remote %} &middot; remote{% endif %}</div>
+      {% if app and app.score_rationale %}<div class="rationale">{{ app.score_rationale[:180] }}</div>{% endif %}
+      {% if job.apply_url %}<a href="{{ job.apply_url }}" target="_blank" rel="noopener">view posting ↗</a>{% endif %}
+    </div>
+    <div class="action">
+      {% if app and app.status in ["ranked", "tailored"] %}
+        <button hx-post="/matches/{{ app.id }}/apply" hx-target="#cs-{{ app.id }}" hx-swap="outerHTML">Apply</button>
+        <span id="cs-{{ app.id }}"></span>
+      {% elif app %}
+        <span id="cs-{{ app.id }}" class="badge">{{ labels.get(app.status, app.status) }}</span>
+      {% else %}
+        <span class="muted">{% if running %}scoring…{% else %}not scored{% endif %}</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p>No jobs yet. Configure sources in <a href="/setup">Setup</a>, then click <em>Discover &amp; score</em>.</p>
+{% endif %}
+</div>

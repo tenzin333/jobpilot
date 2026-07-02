@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: Letter; margin: 0.7in; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; font-size: 11pt; line-height: 1.4; }
+  h1 { font-size: 20pt; margin: 0 0 2px; }
+  .contact { color: #444; font-size: 10pt; margin-bottom: 12px; }
+  h2 { font-size: 12pt; border-bottom: 1px solid #999; padding-bottom: 2px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .summary { margin-bottom: 6px; }
+  .role { margin-bottom: 10px; }
+  .role .head { display: flex; justify-content: space-between; font-weight: bold; }
+  .role .sub { color: #444; font-style: italic; }
+  ul { margin: 4px 0 0; padding-left: 18px; }
+  li { margin-bottom: 2px; }
+  .skills { line-height: 1.6; }
+</style>
+</head>
+<body>
+  <h1>{{ profile.full_name or "Candidate" }}</h1>
+  <div class="contact">
+    {{ profile.email }}{% if profile.phone %} &middot; {{ profile.phone }}{% endif %}
+  </div>
+
+  {% if tailored.summary %}
+  <h2>Summary</h2>
+  <div class="summary">{{ tailored.summary }}</div>
+  {% endif %}
+
+  {% if tailored.highlighted_skills %}
+  <h2>Skills</h2>
+  <div class="skills">{{ tailored.highlighted_skills | join(" &middot; ") }}</div>
+  {% endif %}
+
+  {% if tailored.roles %}
+  <h2>Experience</h2>
+  {% for role in tailored.roles %}
+  <div class="role">
+    <div class="head"><span>{{ role.title }}</span></div>
+    <div class="sub">{{ role.company }}</div>
+    <ul>
+      {% for bullet in role.bullets %}<li>{{ bullet }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if profile.education %}
+  <h2>Education</h2>
+  {% for ed in profile.education %}
+  <div class="role"><strong>{{ ed.degree }}</strong> — {{ ed.institution }}{% if ed.year %} ({{ ed.year }}){% endif %}</div>
+  {% endfor %}
+  {% endif %}
+</body>
+</html>

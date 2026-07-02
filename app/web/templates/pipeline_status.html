@@ -1,0 +1,30 @@
+<div id="pipeline-status" class="status-panel"
+     {% if s.running %}hx-get="/pipeline/status" hx-trigger="every 1500ms" hx-swap="outerHTML"{% endif %}>
+  <div class="status-head">
+    {% if s.running %}
+      <span class="spinner"></span> <strong>Running:</strong> {{ s.stage }}
+    {% elif s.error %}
+      <strong style="color:#b91c1c;">Error:</strong> {{ s.error }}
+    {% elif s.stage == "done" %}
+      <strong style="color:#15803d;">✓ Last run finished</strong>
+    {% else %}
+      <span class="muted">Idle — no run in progress.</span>
+    {% endif %}
+  </div>
+
+  {% if s.stats %}
+  <div class="status-stats">
+    discovered {{ s.stats.get('discovered', 0) }} &middot;
+    ranked {{ s.stats.get('ranked', 0) }} &middot;
+    tailored {{ s.stats.get('tailored', 0) }} &middot;
+    submitted {{ s.stats.get('submitted', 0) }} &middot;
+    needs-you {{ s.stats.get('needs_human', 0) }} &middot;
+    failed {{ s.stats.get('failed', 0) }}
+  </div>
+  {% endif %}
+
+  {% if s.logs %}
+  <pre class="logbox">{% for line in s.logs %}{{ line }}
+{% endfor %}</pre>
+  {% endif %}
+</div>

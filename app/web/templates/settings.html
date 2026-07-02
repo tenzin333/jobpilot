@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Settings — Job Applier Agent{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p>Runtime controls. These override the <code>.env</code> defaults and take effect immediately
+(the cycle interval applies on next restart).</p>
+
+<form method="post" action="/settings">
+  <label><input type="checkbox" name="dry_run" {{ "checked" if control.dry_run else "" }}>
+    DRY_RUN — fill forms but never click final submit</label>
+
+  <label><input type="checkbox" name="submit_kill_switch" {{ "checked" if control.submit_kill_switch else "" }}>
+    Kill switch — block ALL submissions</label>
+
+  <label>Daily submit cap</label>
+  <input type="number" name="daily_submit_cap" value="{{ control.daily_submit_cap }}">
+
+  <label>Match threshold (0–100)</label>
+  <input type="number" name="match_threshold" value="{{ control.match_threshold }}">
+
+  <p class="muted" style="margin-top:0.75rem;">The automatic scheduler is disabled —
+  runs happen only when you click <em>Discover &amp; score</em>, <em>Apply</em>, or
+  <em>Run one cycle</em>.</p>
+
+  <p style="margin-top:1rem;"><button type="submit">Save</button></p>
+</form>
+{% endblock %}

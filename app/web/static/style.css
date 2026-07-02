@@ -1,0 +1,61 @@
+:root { --bg: #f7f7f8; --fg: #1c1c1e; --accent: #2563eb; --muted: #6b7280; --line: #e5e7eb; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg); background: var(--bg); }
+.topbar { display: flex; align-items: center; gap: 1.5rem; padding: 0.75rem 1.5rem; background: #fff; border-bottom: 1px solid var(--line); }
+.topbar nav { display: flex; gap: 1rem; }
+.topbar a { color: var(--fg); text-decoration: none; font-size: 0.9rem; }
+.topbar a:hover { color: var(--accent); }
+main { max-width: 960px; margin: 1.5rem auto; padding: 0 1.5rem; }
+h1 { font-size: 1.5rem; }
+.cards { display: flex; gap: 1rem; flex-wrap: wrap; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; min-width: 140px; display: flex; flex-direction: column; gap: 0.25rem; }
+.card .num { font-size: 1.75rem; font-weight: 700; }
+.card span:last-child { color: var(--muted); font-size: 0.85rem; }
+table { width: 100%; border-collapse: collapse; background: #fff; }
+th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+form label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.9rem; font-weight: 600; }
+form input, form select, form textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 0.5rem 1rem; font: inherit; cursor: pointer; }
+.badge { padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; background: var(--line); }
+.muted { color: var(--muted); font-size: 0.85rem; margin: 0.15rem 0; }
+.match-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+.match-card { display: flex; gap: 0.75rem; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; }
+.match-card .score { font-size: 1.5rem; font-weight: 700; color: var(--accent); min-width: 2.2rem; text-align: center; }
+.match-card .info { flex: 1; }
+.match-card .rationale { font-size: 0.8rem; color: #555; margin: 0.3rem 0; }
+.match-card .action { display: flex; flex-direction: column; align-items: flex-end; gap: 0.4rem; }
+
+/* spinner + loaders */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em;
+  border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.7s linear infinite; }
+.htmx-indicator { display: none; }
+.htmx-request.htmx-indicator, .htmx-request .htmx-indicator { display: inline-block; }
+button:disabled { opacity: 0.6; cursor: progress; }
+
+/* top loading bar (shown during any htmx request) */
+#loadbar { position: fixed; top: 0; left: 0; height: 3px; width: 100%; background: var(--accent);
+  transform: scaleX(0); transform-origin: left; transition: transform 0.2s ease; z-index: 1000; }
+#loadbar.on { transform: scaleX(0.9); transition: transform 8s ease-out; }
+
+/* pipeline live panel */
+.status-list { list-style: none; padding: 0; }
+.status-panel { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; }
+.status-head { font-size: 1rem; margin-bottom: 0.4rem; }
+.status-stats { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
+.logbox { background: #0f172a; color: #cbd5e1; font-size: 0.78rem; line-height: 1.45;
+  padding: 0.75rem; border-radius: 8px; max-height: 260px; overflow: auto; white-space: pre-wrap; margin: 0; }
+
+/* notice banners */
+.notice { padding: 0.6rem 0.9rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
+.notice-danger { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+.notice-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+
+/* in-page co-browsing (assisted hand-off) — modal overlay on the same page */
+.cobrowse { position: fixed; inset: 3vh 3vw; background: #fff; border: 1px solid #ccc;
+  border-radius: 10px; box-shadow: 0 12px 48px rgba(0,0,0,.35); z-index: 1000;
+  padding: 0.75rem; overflow: auto; }
+.cobrowse-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.cobrowse-screen { display: block; margin: 0.4rem auto 0; max-width: 100%; height: auto;
+  border: 1px solid #ddd; cursor: crosshair; background: #f8f8f8; }

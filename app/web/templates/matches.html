@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Matches — Job Applier Agent{% endblock %}
+{% block content %}
+<h1>Matches <span class="badge">{{ rows | length }}</span></h1>
+<p>Ranked by match score. Click <strong>Apply</strong> and the agent tailors + submits in the
+background — move straight to the next card; each card updates itself when done.</p>
+
+{% if rows %}
+<div class="match-grid">
+  {% for app, job in rows %}
+  <div class="match-card">
+    <div class="score" title="match score">{{ app.match_score if app.match_score is not none else "—" }}</div>
+    <div class="info">
+      <strong>{{ job.title }}</strong>
+      <div class="muted">{{ job.company }} &middot; {{ job.location or "—" }} &middot; <span class="badge">{{ job.source }}</span>{% if job.remote %} &middot; remote{% endif %}</div>
+      {% if app.score_rationale %}<div class="rationale">{{ app.score_rationale[:180] }}</div>{% endif %}
+      {% if job.apply_url %}<a href="{{ job.apply_url }}" target="_blank" rel="noopener">view posting ↗</a>{% endif %}
+    </div>
+    <div class="action">
+      {% if app.status in ["ranked", "tailored"] %}
+        <button hx-post="/matches/{{ app.id }}/apply" hx-target="#cs-{{ app.id }}" hx-swap="outerHTML">Apply</button>
+        <span id="cs-{{ app.id }}"></span>
+      {% else %}
+        <span id="cs-{{ app.id }}" class="badge">{{ labels.get(app.status, app.status) }}</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p>No matches yet. <a href="/jobs">Discover jobs</a>, then <a href="/applications">Rank now</a>.</p>
+{% endif %}
+{% endblock %}
