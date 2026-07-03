@@ -13,7 +13,16 @@ _settings = get_settings()
 # check_same_thread=False so the APScheduler background thread can share the engine.
 _is_sqlite = _settings.database_url.startswith("sqlite")
 _connect_args = {"check_same_thread": False} if _is_sqlite else {}
-engine = create_engine(_settings.database_url, echo=False, connect_args=_connect_args)
+# For remote/serverless Postgres (e.g. Neon, which suspends idle connections),
+# validate connections before use and recycle stale ones so we never hand out a
+# dropped connection ("server closed the connection unexpectedly").
+_engine_kwargs = {} if _is_sqlite else {"pool_pre_ping": True, "pool_recycle": 300}
+engine = create_engine(
+    _settings.database_url,
+    echo=False,
+    connect_args=_connect_args,
+    **_engine_kwargs,
+)
 
 if _is_sqlite:
     @event.listens_for(engine, "connect")

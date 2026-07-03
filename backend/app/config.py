@@ -81,9 +81,12 @@ class Settings(BaseSettings):
     cycle_interval_minutes: int = 60
 
     # Assisted hand-off (captcha-gated apps): one persistent browser, streamed
-    # into the dashboard (headless — no pop-up window; the stream is the view).
+    # into the dashboard. Default to REAL headed Chrome positioned off-screen —
+    # an authentic fingerprint (passes ATS anti-bot) with no visible window.
     assist_user_data_dir: str = "./.assist_profile"
-    assist_headless: bool = True
+    assist_headless: bool = False
+    assist_hide_window: bool = True
+    assist_channel: str = "chrome"  # installed Google Chrome; falls back to Chromium
 
     # SMTP
     smtp_host: str = ""

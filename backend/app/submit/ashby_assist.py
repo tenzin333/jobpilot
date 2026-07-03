@@ -12,8 +12,19 @@ headless mode (never a real site).
 from __future__ import annotations
 
 import logging
+import random
 
 log = logging.getLogger("assist")
+
+
+def _type_human(loc, value: str) -> None:
+    """Focus, clear, and type with per-char delays (looks human to anti-bot)."""
+    loc.click(timeout=2000)
+    try:
+        loc.fill("")
+    except Exception:
+        pass
+    loc.type(value, delay=random.randint(30, 90))
 
 # Field types that are files (handled via the file input, not text fill).
 _FILE_TYPES = {"File", "file"}
@@ -112,7 +123,7 @@ def _fill_one(page, ans: dict) -> bool:
     loc = _by_path(page, path)
     if loc is not None:
         try:
-            loc.fill(value, timeout=2000)
+            _type_human(loc, value)
             return True
         except Exception:
             try:  # a native <select> also carries the path
@@ -126,7 +137,7 @@ def _fill_one(page, ans: dict) -> bool:
         lambda: page.get_by_placeholder(title, exact=False).first,
     ):
         try:
-            target().fill(value, timeout=1500)
+            _type_human(target(), value)
             return True
         except Exception:
             continue

@@ -29,6 +29,22 @@ log = logging.getLogger("assist")
 _VIEWPORT = {"width": 1280, "height": 800}
 _SHUTDOWN = "__shutdown__"  # sentinel apply_url that tells the worker to tear down
 
+# Injected before any page script to hide the most common automation signals so
+# the ATS anti-bot (reCAPTCHA Enterprise + fingerprinting) sees an authentic browser.
+_STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+window.chrome = window.chrome || {runtime: {}};
+Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+const _q = window.navigator.permissions && window.navigator.permissions.query;
+if (_q) {
+  window.navigator.permissions.query = (p) =>
+    p && p.name === 'notifications'
+      ? Promise.resolve({state: Notification.permission})
+      : _q(p);
+}
+"""
+
 
 @dataclass
 class _Job:
@@ -41,9 +57,12 @@ class _Job:
 class AssistSession:
     def __init__(self, *, user_data_dir: str, headless: bool = True,
                  wait_for_user: bool = True, keep_open_seconds: int = 1800,
-                 frame_interval: float = 0.1):
+                 frame_interval: float = 0.1, channel: str = "chrome",
+                 hide_window: bool = True):
         self.user_data_dir = user_data_dir
         self.headless = headless
+        self.channel = channel
+        self.hide_window = hide_window
         self.wait_for_user = wait_for_user
         self.keep_open_seconds = keep_open_seconds
         self.frame_interval = frame_interval
@@ -114,9 +133,27 @@ class AssistSession:
         from playwright.sync_api import sync_playwright
 
         self._pw = sync_playwright().start()
-        self._context = self._pw.chromium.launch_persistent_context(
-            self.user_data_dir, headless=self.headless, viewport=dict(_VIEWPORT)
+        args = ["--disable-blink-features=AutomationControlled"]
+        if not self.headless and self.hide_window:
+            # Real headed Chrome (authentic fingerprint) but positioned off-screen
+            # so no window is visible; we still stream it via screenshots.
+            args += ["--window-position=-32000,-32000"]
+        opts = dict(
+            headless=self.headless,
+            viewport=dict(_VIEWPORT),
+            args=args,
+            ignore_default_args=["--enable-automation"],
         )
+        try:  # prefer the user's installed Google Chrome (more authentic than bundled Chromium)
+            self._context = self._pw.chromium.launch_persistent_context(
+                self.user_data_dir, channel=self.channel, **opts)
+        except Exception as exc:  # noqa: BLE001 — Chrome not installed, etc.
+            log.info("assist: channel=%s unavailable (%s); using bundled Chromium", self.channel, exc)
+            self._context = self._pw.chromium.launch_persistent_context(self.user_data_dir, **opts)
+        try:
+            self._context.add_init_script(_STEALTH_JS)
+        except Exception:
+            pass
 
     def _apply_input(self, page, ev: dict) -> None:
         """Forward one user input event from the streamed view to the real page."""
@@ -243,7 +280,9 @@ def _session() -> AssistSession:
     with _SESSION_LOCK:
         if _SESSION is None:
             s = get_settings()
-            _SESSION = AssistSession(user_data_dir=s.assist_user_data_dir, headless=s.assist_headless)
+            _SESSION = AssistSession(
+                user_data_dir=s.assist_user_data_dir, headless=s.assist_headless,
+                channel=s.assist_channel, hide_window=s.assist_hide_window)
         return _SESSION
 
 

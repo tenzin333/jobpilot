@@ -44,6 +44,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Job Applier Agent", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
 
+# Serve the built React (Vite) SPA at /ui when it has been built (frontend/dist).
+# In development the SPA runs from the Vite dev server (npm run dev), which proxies
+# /api to this backend — so this mount is only used for production builds.
+# __file__ is backend/app/main.py, so parents[2] is the repo root that holds frontend/.
+_SPA_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if _SPA_DIST.is_dir():
+    app.mount("/ui", StaticFiles(directory=str(_SPA_DIST), html=True), name="spa")
+
 from app.web.setup import router as setup_router  # noqa: E402
 from app.web.jobs import router as jobs_router  # noqa: E402
 from app.web.applications import router as applications_router  # noqa: E402
@@ -53,7 +61,9 @@ from app.web.settings import router as settings_router  # noqa: E402
 from app.web.summary import router as summary_router  # noqa: E402
 from app.web.matches import router as matches_router  # noqa: E402
 from app.web.assist_ws import router as assist_ws_router  # noqa: E402
+from app.web.api import router as api_router  # noqa: E402
 
+app.include_router(api_router)
 app.include_router(setup_router)
 app.include_router(jobs_router)
 app.include_router(applications_router)

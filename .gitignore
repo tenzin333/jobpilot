@@ -7,7 +7,7 @@ __pycache__/
 
 # Secrets & local runtime config
 .env
-/config/preferences.yaml
+/backend/config/preferences.yaml
 
 # SQLite database (+ WAL/SHM sidecars)
 *.db
@@ -16,15 +16,15 @@ __pycache__/
 *.db-journal
 
 # User data: résumés, generated résumé/cover PDFs, artifacts
-/data/
+/backend/data/
 
 # Assisted co-browse browser profile (cookies/logins, ~30MB)
 .assist_profile/
 
 # Server log dumps / scratch
 *.log
-/e2.txt
-/o2.txt
+/backend/e2.txt
+/backend/o2.txt
 
 # OS / editor cruft
 .DS_Store

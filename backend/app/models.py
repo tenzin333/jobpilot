@@ -51,6 +51,10 @@ class Profile(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     full_name: str = ""
+    honorific: str = ""
+    first_name: str = ""
+    middle_name: str = ""
+    last_name: str = ""
     email: str = ""
     phone: str = ""
     base_resume_path: str = ""
