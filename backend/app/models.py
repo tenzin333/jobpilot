@@ -127,6 +127,21 @@ class Control(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class ScoreCache(SQLModel, table=True):
+    """Cached LLM match scores, keyed by a hash of (kind, model, profile, job).
+
+    Lets Discover/Re-score reuse a score whose inputs (the job text, the profile,
+    and the model) are unchanged, instead of re-calling the LLM — which keeps
+    re-runs off the free-tier rate limit. A changed résumé, job description, or
+    model produces a different key, so it recomputes automatically.
+    """
+
+    key: str = Field(primary_key=True)
+    kind: str = Field(index=True)  # "prefilter" | "deep"
+    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Run(SQLModel, table=True):
     """Per-orchestrator-cycle stats, used for daily summaries."""
 

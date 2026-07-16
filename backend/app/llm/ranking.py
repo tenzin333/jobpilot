@@ -13,7 +13,8 @@ import re
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from app.config import Preferences, RemotePreference
+from app.config import Preferences, RemotePreference, get_settings
+from app.llm import score_cache
 from app.llm.client import parse_structured
 from app.models import Application, ApplicationStatus, Job, Profile
 from app.pipeline.state import PIPELINE_STATE
@@ -67,10 +68,15 @@ def passes_location(job: Job, prefs: Preferences) -> bool:
         return pref in (RemotePreference.remote_only, RemotePreference.hybrid_ok, RemotePreference.any)
     if pref == RemotePreference.remote_only:
         return False
-    if not prefs.locations:
+    # On-site/unknown job and the user is open to non-remote work. Only apply a
+    # geographic gate if they named real cities — "Remote" in the list expresses
+    # remote interest, not a location restriction, so on its own it must not
+    # reject every on-site job (which would make `any` behave like remote_only).
+    real_locations = [p for p in prefs.locations if p.strip().lower() != "remote"]
+    if not real_locations:
         return True
     loc = (job.location or "").lower()
-    return any(p.lower() in loc for p in prefs.locations if p.lower() != "remote")
+    return any(p.lower() in loc for p in real_locations)
 
 
 def passes_salary(job: Job, prefs: Preferences) -> bool:
@@ -193,6 +199,16 @@ _DEEP_BATCH_SYSTEM_SUFFIX = (
 )
 
 
+def _has_usable_description(job: Job, min_len: int = 80) -> bool:
+    """Whether a job carries enough description text to deep-score meaningfully.
+
+    Some sources (e.g. LinkedIn guest cards) return title-only postings with no
+    body. Deep-scoring those just injects noise — the model has nothing beyond the
+    title to judge — so they keep their (title-based) prefilter score instead.
+    """
+    return len((job.description or "").strip()) >= min_len
+
+
 def _deep_brief(job: Job) -> str:
     return (
         f"Company: {job.company}\nTitle: {job.title}\nLocation: {job.location}\n"
@@ -218,8 +234,12 @@ def deep_score_batch(
         user = "Score each job below.\n\n" + "\n\n".join(lines)
         try:
             batch = parse_structured(
+                # Deep scoring runs on the QUALITY tier (a stronger model): this is
+                # the step whose score + rationale the user acts on, and it only
+                # covers the top `deep_keep` jobs in small batches, so the extra
+                # cost stays within free-tier limits. The prefilter stays on `fast`.
                 system=system, user=user, schema=BatchDeep,
-                tier="fast", cache_system=False, max_tokens=1500,
+                tier="quality", cache_system=False, max_tokens=1500,
             )
         except Exception:  # noqa: BLE001 — skip a failed group, keep the prefilter score
             continue
@@ -234,6 +254,71 @@ def deep_score_batch(
     return out
 
 
+# --- caching layer ------------------------------------------------------
+#
+# Wrap the two LLM stages with a persistent cache so re-running (Discover or
+# Re-score) only calls the model for jobs whose inputs actually changed. A job's
+# cache key hashes its brief text; the profile signature hashes the full profile
+# prefix; the model name is included so switching models recomputes.
+
+def _profile_sig(profile: Profile) -> str:
+    return score_cache.sha(build_profile_prefix(profile))
+
+
+def _cached_prefilter(
+    session: Session, jobs: list[Job], profile: Profile
+) -> dict[int, PrefilterScore]:
+    model = get_settings().resolve_tier("fast")[1]
+    psig = _profile_sig(profile)
+    keymap = {
+        j.id: score_cache.make_key("prefilter", model, psig, score_cache.sha(_batch_brief(j)))
+        for j in jobs
+    }
+    hits = score_cache.get_many(session, list(keymap.values()))
+    out: dict[int, PrefilterScore] = {}
+    misses: list[Job] = []
+    for j in jobs:
+        payload = hits.get(keymap[j.id])
+        if payload is not None:
+            out[j.id] = PrefilterScore(**payload)
+        else:
+            misses.append(j)
+    if misses:
+        fresh = prefilter(misses, profile)
+        for j in misses:
+            score = fresh.get(j.id)
+            if score is not None:
+                out[j.id] = score
+                score_cache.put(session, keymap[j.id], "prefilter", score.model_dump())
+    return out
+
+
+def _cached_deep_score_batch(
+    session: Session, jobs: list[Job], profile: Profile
+) -> dict[int, MatchScore]:
+    model = get_settings().resolve_tier("quality")[1]
+    psig = _profile_sig(profile)
+    keymap = {
+        j.id: score_cache.make_key("deep", model, psig, score_cache.sha(_deep_brief(j)))
+        for j in jobs
+    }
+    hits = score_cache.get_many(session, list(keymap.values()))
+    out: dict[int, MatchScore] = {}
+    misses: list[Job] = []
+    for j in jobs:
+        payload = hits.get(keymap[j.id])
+        if payload is not None:
+            out[j.id] = MatchScore(**payload)
+        else:
+            misses.append(j)
+    if misses:
+        fresh = deep_score_batch(misses, profile)
+        for jid, score in fresh.items():
+            out[jid] = score
+            score_cache.put(session, keymap[jid], "deep", score.model_dump())
+    return out
+
+
 # --- orchestration ------------------------------------------------------
 
 def rank_jobs(
@@ -245,20 +330,27 @@ def rank_jobs(
     prefilter_max: int = 80,
     deep_keep: int = 25,
 ) -> dict[str, int]:
-    """Rank jobs that don't yet have an Application. Returns counts.
+    """(Re)rank jobs that are new or still in the `ranked` state. Returns counts.
 
     hard filter -> cap to newest `prefilter_max` -> batched prefilter -> persist
     a match score from the prefilter for every survivor (so cards always show a
     score even when the deep model is rate-limited) -> upgrade the top `deep_keep`
     with a deep score + rationale (best-effort).
+
+    Re-scorable = jobs with no Application, or one still in `ranked` (so "Re-score"
+    can refresh a job that was rate-limited into a poor/zero score). Jobs whose
+    Application has advanced (tailored/queued/submitted/needs_human) or failed are
+    left untouched — those are in-flight, done, or handled by the retry flow.
     """
-    ranked_job_ids = set(session.exec(select(Application.job_id)).all())
+    existing = {a.job_id: a for a in session.exec(select(Application)).all()}
+    # Jobs locked by an Application that must not be re-scored.
+    locked = {jid for jid, a in existing.items() if a.status != ApplicationStatus.ranked.value}
     all_jobs = session.exec(select(Job)).all()
     candidates = [
         j for j in all_jobs
-        if j.id not in ranked_job_ids and passes_hard_filters(j, prefs)
+        if j.id not in locked and passes_hard_filters(j, prefs)
     ]
-    filtered_out = len(all_jobs) - len(ranked_job_ids) - len(candidates)
+    filtered_out = len(all_jobs) - len(locked) - len(candidates)
 
     if not candidates:
         return {"candidates": 0, "filtered_out": max(filtered_out, 0), "scored": 0, "ranked": 0}
@@ -266,24 +358,29 @@ def rank_jobs(
     # Bound LLM volume: prefilter only the most recently discovered candidates.
     to_score = sorted(candidates, key=lambda j: j.discovered_at, reverse=True)[:prefilter_max]
 
-    pre = prefilter(to_score, profile)
+    pre = _cached_prefilter(session, to_score, profile)
     survivors = sorted(
         (j for j in to_score if pre.get(j.id, PrefilterScore(score=0)).score >= prefilter_min),
         key=lambda j: pre[j.id].score,
         reverse=True,
     )[:prefilter_keep]
 
-    # 1. Persist a score for every survivor from the (fast, batched) prefilter.
+    # 1. Persist a score for every survivor from the (fast, batched) prefilter,
+    #    reusing an existing `ranked` Application when re-scoring.
     apps: dict[int, Application] = {}
     ranked = 0
     for job in survivors:
         pscore = pre[job.id].score
-        app = Application(
-            job_id=job.id,
-            status=ApplicationStatus.ranked.value,
-            match_score=pscore * 10,  # 0-10 -> 0-100
-            score_rationale=f"Prefilter relevance {pscore}/10 (awaiting detailed review).",
+        will_deep = _has_usable_description(job)
+        app = existing.get(job.id) or Application(job_id=job.id)
+        app.status = ApplicationStatus.ranked.value
+        app.match_score = pscore * 10  # 0-10 -> 0-100
+        app.score_rationale = (
+            f"Prefilter relevance {pscore}/10 (awaiting detailed review)."
+            if will_deep
+            else f"Prefilter relevance {pscore}/10 - no job description available for a detailed review."
         )
+        app.gaps = []  # cleared; a deep score below re-populates when available
         session.add(app)
         session.commit()
         apps[job.id] = app
@@ -292,10 +389,11 @@ def rank_jobs(
 
     # 2. Upgrade the top few with a deep score + rationale, BATCHED (a handful of
     #    LLM calls instead of one-per-job) to stay well within free-tier request
-    #    limits. Best-effort: a failed group just leaves the prefilter score.
-    to_deep = survivors[:deep_keep]
+    #    limits. Skip description-less jobs (nothing to deep-score) and let them
+    #    keep the prefilter score. Best-effort: a failed group leaves it in place.
+    to_deep = [j for j in survivors[:deep_keep] if _has_usable_description(j)]
     if to_deep:
-        for job_id, score in deep_score_batch(to_deep, profile).items():
+        for job_id, score in _cached_deep_score_batch(session, to_deep, profile).items():
             app = apps[job_id]
             app.match_score = score.score
             app.score_rationale = score.rationale
