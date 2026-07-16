@@ -64,9 +64,18 @@ export interface JobRow {
   application: JobApplication | null;
 }
 
+export interface SourceInfo {
+  name: string;
+  kind: "ats" | "search" | "career";
+  enabled: boolean;
+  ready: boolean;
+  detail: string;
+}
+
 export interface JobsData {
   running: boolean;
   jobs: JobRow[];
+  sources: SourceInfo[];
 }
 
 export interface SetupProfile {
@@ -186,6 +195,11 @@ export const api = {
   pipelineStatus: () => request<PipelineSnapshot>("/pipeline/status"),
   jobs: () => request<JobsData>("/jobs"),
   discover: () => request<{ ok: boolean; running: boolean }>("/jobs/discover", { method: "POST" }),
+  toggleSource: (name: string, enabled: boolean) =>
+    request<{ ok: boolean; sources: SourceInfo[] }>(`/sources/${name}`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
   clearJobs: () => request<{ ok: boolean }>("/jobs/clear", { method: "POST" }),
   rank: () => request<{ ok: boolean }>("/applications/rank", { method: "POST" }),
   apply: (appId: number) => request<StatusState>(`/matches/${appId}/apply`, { method: "POST" }),

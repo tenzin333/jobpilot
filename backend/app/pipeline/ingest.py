@@ -10,7 +10,7 @@ import logging
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.config import Preferences
+from app.config import Preferences, SourceConfig
 from app.discovery.adzuna import AdzunaConnector
 from app.discovery.ashby import AshbyConnector
 from app.discovery.base import Connector, RawJob
@@ -48,6 +48,52 @@ SEARCH_CONNECTORS = {
 
 
 _CAREER = CareerPagesConnector()
+
+
+# Every discovery source the UI can toggle, in display order: keyword-search
+# aggregators first (self-contained — no per-company config needed), then the
+# company-slug ATS boards, then generic career pages.
+KNOWN_SOURCES: list[str] = [
+    AtsType.themuse.value, AtsType.remotive.value, AtsType.adzuna.value, AtsType.linkedin.value,
+    AtsType.greenhouse.value, AtsType.lever.value, AtsType.ashby.value,
+    AtsType.smartrecruiters.value, AtsType.workable.value,
+    AtsType.career_page.value,
+]
+
+
+def _source_kind(name: str) -> str:
+    if name in SEARCH_CONNECTORS:
+        return "search"
+    if name in CONNECTORS:
+        return "ats"
+    return "career"
+
+
+def all_sources(prefs: Preferences) -> list[dict]:
+    """Every known discovery source with its current enable state + readiness.
+
+    Includes DISABLED sources (so the UI can offer a toggle for each). `ready`
+    means the source would actually fetch on a Discover run — enabled AND, for
+    company/career sources, having companies/sites configured. This mirrors
+    `fetch_all`'s dispatch so the UI never claims a fetch that won't happen.
+    """
+    out: list[dict] = []
+    for name in KNOWN_SOURCES:
+        cfg = prefs.sources.get(name) or SourceConfig()
+        kind = _source_kind(name)
+        if kind == "search":
+            detail, ready = "keyword search", cfg.enabled
+        elif kind == "ats":
+            n = len(cfg.companies)
+            detail = f"{n} compan{'y' if n == 1 else 'ies'}" if n else "no companies"
+            ready = cfg.enabled and n > 0
+        else:  # career
+            n = len(cfg.sites)
+            detail = f"{n} site{'' if n == 1 else 's'}" if n else "no sites"
+            ready = cfg.enabled and n > 0
+        out.append({"name": name, "kind": kind, "enabled": cfg.enabled,
+                    "ready": ready, "detail": detail})
+    return out
 
 
 async def fetch_all(prefs: Preferences) -> list[RawJob]:

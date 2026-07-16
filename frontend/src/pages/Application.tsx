@@ -165,7 +165,7 @@ export default function Applications() {
           <CardContent className="py-14 text-center">
             <p className="font-medium">No applications yet</p>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Rank jobs in Matches, then tailor and submit them here.
+              Rank jobs on the Jobs page, then tailor and submit them here.
             </p>
           </CardContent>
         </Card>

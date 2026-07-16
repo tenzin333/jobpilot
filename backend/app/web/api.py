@@ -257,7 +257,35 @@ def jobs_list() -> dict:
                     "application": application,
                 }
             )
-    return {"running": running, "jobs": jobs}
+    from app.config import get_preferences
+    from app.pipeline.ingest import all_sources
+
+    return {"running": running, "jobs": jobs, "sources": all_sources(get_preferences())}
+
+
+class SourceTogglePayload(BaseModel):
+    enabled: bool
+
+
+@router.post("/sources/{name}")
+def source_toggle(name: str, payload: SourceTogglePayload) -> dict:
+    """Enable/disable one discovery source, persisting to preferences.yaml.
+
+    Only flips the `enabled` flag — company/site lists are managed in Setup —
+    so a Discover run immediately reflects the change (get_preferences reloads).
+    """
+    from app.config import SourceConfig, get_preferences
+    from app.pipeline.ingest import KNOWN_SOURCES, all_sources
+
+    if name not in KNOWN_SOURCES:
+        raise HTTPException(status_code=404, detail=f"Unknown discovery source: {name}")
+    prefs = get_preferences()
+    cfg = prefs.sources.get(name) or SourceConfig()
+    cfg.enabled = payload.enabled
+    prefs.sources[name] = cfg
+    prefs.save()
+    log.info("Discovery source %s %s via API", name, "enabled" if payload.enabled else "disabled")
+    return {"ok": True, "sources": all_sources(prefs)}
 
 
 @router.post("/jobs/discover")

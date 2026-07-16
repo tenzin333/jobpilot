@@ -3,7 +3,6 @@ import { Toaster } from "@/components/ui/sonner";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Jobs from "./pages/Jobs";
-import Matches from "./pages/Matches";
 import Applications from "./pages/Application";
 import Intervention from "./pages/Interventation";
 import Pipeline from "./pages/Pipeline";
@@ -18,7 +17,6 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="jobs" element={<Jobs />} />
-          <Route path="matches" element={<Matches />} />
           <Route path="applications" element={<Applications />} />
           <Route path="intervention" element={<Intervention />} />
           <Route path="pipeline" element={<Pipeline />} />

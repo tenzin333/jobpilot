@@ -12,7 +12,8 @@ from app.discovery.greenhouse import parse_jobs  # noqa: E402
 from app.discovery.lever import parse_postings  # noqa: E402
 from app.models import Job  # noqa: E402
 from app.pipeline.dedup import dedup_hash, is_near_duplicate, normalize_text  # noqa: E402
-from app.pipeline.ingest import store_jobs  # noqa: E402
+from app.config import CareerSite, Preferences, SourceConfig  # noqa: E402
+from app.pipeline.ingest import KNOWN_SOURCES, all_sources, store_jobs  # noqa: E402
 from app.pipeline.normalize import to_job  # noqa: E402
 
 
@@ -113,3 +114,35 @@ def test_store_jobs_idempotent_and_fuzzy():
 
     total = len(session.exec(select(Job)).all())
     assert total == 2
+
+
+def test_all_sources_reports_state_and_readiness():
+    prefs = Preferences(sources={
+        # enabled ATS with companies -> enabled + ready
+        "greenhouse": SourceConfig(enabled=True, companies=["acme", "beta"]),
+        # enabled ATS with NO companies -> enabled but NOT ready (won't fetch)
+        "lever": SourceConfig(enabled=True, companies=[]),
+        # disabled -> present but off
+        "ashby": SourceConfig(enabled=False, companies=["x"]),
+        # enabled keyword aggregator -> enabled + ready (no companies needed)
+        "remotive": SourceConfig(enabled=True),
+        # enabled career page with a site -> enabled + ready
+        "career_page": SourceConfig(enabled=True, sites=[CareerSite(url="https://x/careers")]),
+    })
+    got = {s["name"]: s for s in all_sources(prefs)}
+
+    # Every known source appears (so the UI can offer a toggle for each), incl. linkedin.
+    assert set(got) == set(KNOWN_SOURCES)
+    assert "linkedin" in got and got["linkedin"]["enabled"] is False
+
+    assert got["greenhouse"] == {"name": "greenhouse", "kind": "ats", "enabled": True,
+                                 "ready": True, "detail": "2 companies"}
+    # enabled but no companies: on, but flagged not-ready with a clear detail
+    assert got["lever"]["enabled"] is True and got["lever"]["ready"] is False
+    assert got["lever"]["detail"] == "no companies"
+    assert got["ashby"]["enabled"] is False and got["ashby"]["ready"] is False
+    assert got["remotive"] == {"name": "remotive", "kind": "search", "enabled": True,
+                               "ready": True, "detail": "keyword search"}
+    assert got["career_page"]["kind"] == "career" and got["career_page"]["detail"] == "1 site"
+    # a source absent from prefs.sources entirely -> defaults to disabled
+    assert got["adzuna"]["enabled"] is False

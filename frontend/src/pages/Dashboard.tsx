@@ -116,10 +116,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2 px-5">
             <Button asChild size="sm">
-              <Link to="/jobs">Discover &amp; rank</Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link to="/matches">Review matches</Link>
+              <Link to="/jobs">Discover &amp; apply</Link>
             </Button>
             <Button asChild variant="outline" size="sm">
               <Link to="/intervention">Intervention ({stats.needs_human})</Link>

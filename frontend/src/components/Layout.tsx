@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   Mail,
   Settings,
-  Sparkles,
   UserRound,
   Users,
   type LucideIcon,
@@ -17,7 +16,6 @@ import { cn } from "@/lib/utils";
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/jobs", label: "Jobs", icon: Briefcase },
-  { to: "/matches", label: "Matches", icon: Sparkles },
   { to: "/applications", label: "Applications", icon: ClipboardList },
   { to: "/intervention", label: "Intervention", icon: Users },
   { to: "/pipeline", label: "Pipeline", icon: GitBranch },
