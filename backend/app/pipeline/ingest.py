@@ -17,6 +17,7 @@ from app.discovery.base import Connector, RawJob
 from app.discovery.career_pages import CareerPagesConnector
 from app.discovery.greenhouse import GreenhouseConnector
 from app.discovery.lever import LeverConnector
+from app.discovery.linkedin import LinkedInConnector
 from app.discovery.remotive import RemotiveConnector
 from app.discovery.smartrecruiters import SmartRecruitersConnector
 from app.discovery.themuse import TheMuseConnector
@@ -42,6 +43,7 @@ SEARCH_CONNECTORS = {
     AtsType.themuse.value: TheMuseConnector(),
     AtsType.remotive.value: RemotiveConnector(),
     AtsType.adzuna.value: AdzunaConnector(),
+    AtsType.linkedin.value: LinkedInConnector(),
 }
 
 

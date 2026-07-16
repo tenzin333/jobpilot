@@ -123,6 +123,7 @@ def test_matches_and_status_endpoints(monkeypatch):
                   dedup_hash="hz", ats_type="greenhouse", apply_url="https://x")
         s.add(job)
         s.commit()
+        job_id = job.id
         app_row = Application(job_id=job.id, status=ApplicationStatus.ranked.value, match_score=90)
         s.add(app_row)
         s.commit()
@@ -130,27 +131,28 @@ def test_matches_and_status_endpoints(monkeypatch):
 
     from app.main import app as fastapi_app
     with TestClient(fastapi_app) as client:
-        r = client.get("/matches")
+        r = client.get("/api/jobs")
         assert r.status_code == 200
-        assert "AI Engineer" in r.text
+        assert any(j["title"] == "AI Engineer" for j in r.json()["jobs"])
 
         # While an apply is in progress (tracker active), status shows the stage + polls.
         from app.pipeline.state import apply_set_stage, apply_start
         apply_start(app_id)
         apply_set_stage(app_id, "tailoring")
-        r2 = client.get(f"/matches/{app_id}/status")
+        r2 = client.get(f"/api/matches/{app_id}/status")
         assert r2.status_code == 200
-        assert "Tailoring" in r2.text and "hx-get" in r2.text
+        assert "Tailoring" in r2.json()["label"] and r2.json()["polling"] is True
 
-        # With no active apply, the cell is a static badge (no infinite polling).
+        # With no active apply, the status is terminal/static (no further polling).
         from app.pipeline import state
         state._apply_progress.clear()
-        r3 = client.get(f"/matches/{app_id}/status")
-        assert "hx-get" not in r3.text
+        r3 = client.get(f"/api/matches/{app_id}/status")
+        assert r3.json()["polling"] is False
 
-    # cleanup rows
+    # cleanup rows (the job too — it lives in a file db shared across runs)
     with Session(app_engine) as s:
         s.delete(s.get(Application, app_id))
+        s.delete(s.get(Job, job_id))
         s.commit()
 
 
@@ -164,23 +166,25 @@ def test_retry_endpoint_resets_failed(monkeypatch):
                   dedup_hash="hr", ats_type="greenhouse", apply_url="https://x")
         s.add(job)
         s.commit()
+        job_id = job.id
         row = Application(job_id=job.id, status=ApplicationStatus.failed.value,
                           match_score=85, resume_path="r.pdf", needs_human_reason="")
         s.add(row)
         s.commit()
         app_id = row.id
 
-    import app.web.matches as m
-    monkeypatch.setattr(m, "apply_one", lambda app_id: "ok")  # don't run the real pipeline
+    import app.web.api as api_mod
+    monkeypatch.setattr(api_mod, "apply_one", lambda app_id: "ok")  # don't run the real pipeline
 
     from app.main import app as fastapi_app
     with TestClient(fastapi_app) as client:
-        r = client.post(f"/matches/{app_id}/retry")
+        r = client.post(f"/api/matches/{app_id}/retry")
         assert r.status_code == 200
-        assert "hx-get" in r.text  # apply started -> live-polling fragment
+        assert r.json()["polling"] is True  # apply started -> client keeps polling
 
     with Session(app_engine) as s:
         # had a resume -> retried from the 'tailored' stage, not stuck on 'failed'
         assert s.get(Application, app_id).status == ApplicationStatus.tailored.value
         s.delete(s.get(Application, app_id))
+        s.delete(s.get(Job, job_id))
         s.commit()

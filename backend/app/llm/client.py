@@ -75,7 +75,9 @@ def _chat(
                             model, resp.status_code, attempt + 1, resp.text[:160])
                 retry_after = resp.headers.get("retry-after")
                 wait = float(retry_after) if retry_after else 2 ** attempt
-                time.sleep(min(wait, 8))  # cap so one rate-limited call can't stall the run
+                # Honor the provider's Retry-After (Groq free windows exceed 8s), but
+                # cap so one rate-limited call can't stall the run indefinitely.
+                time.sleep(min(wait, 90))
                 continue
             if resp.status_code >= 400:
                 log.warning("LLM %s failed %s: %s", model, resp.status_code, resp.text[:200])

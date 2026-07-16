@@ -56,7 +56,8 @@ def test_setup_roundtrip_pdf(tmp_path: Path, monkeypatch):
     # Isolate preferences.yaml to a temp file across all access points.
     prefs_path = tmp_path / "preferences.yaml"
     monkeypatch.setattr("app.config.PREFERENCES_PATH", prefs_path)
-    monkeypatch.setattr("app.web.setup.get_preferences", lambda: Preferences.load(prefs_path))
+    # api.setup_save loads prefs via app.config.get_preferences — point it at the temp file.
+    monkeypatch.setattr("app.config.get_preferences", lambda: Preferences.load(prefs_path))
 
     orig_save = Preferences.save
     monkeypatch.setattr(Preferences, "save", lambda self, path=prefs_path: orig_save(self, path))
@@ -65,23 +66,32 @@ def test_setup_roundtrip_pdf(tmp_path: Path, monkeypatch):
     _make_pdf(resume, ["Alex Dev", "Platform Engineer", "Terraform, AWS"])
 
     with TestClient(app) as client:
+        # 1. Upload + parse the résumé (creates the Profile with raw text).
         with resume.open("rb") as fh:
-            resp = client.post(
-                "/setup",
-                data={
-                    "desired_roles": "Backend Engineer\nPlatform Engineer",
-                    "locations": "Remote\nNew York, NY",
+            up = client.post(
+                "/api/setup/resume",
+                files={"resume": ("me.pdf", fh, "application/pdf")},
+            )
+        assert up.status_code == 200
+
+        # 2. Save preferences + answer bank as JSON (what the React setup form posts).
+        resp = client.post(
+            "/api/setup",
+            json={
+                "preferences": {
+                    "desired_roles": ["Backend Engineer", "Platform Engineer"],
+                    "locations": ["Remote", "New York, NY"],
                     "remote_preference": "hybrid_ok",
-                    "min_salary": "150000",
+                    "min_salary": 150000,
                     "salary_currency": "USD",
                     "work_authorization": "US Citizen",
-                    "greenhouse_companies": "stripe\nairbnb",
-                    "lever_companies": "netflix",
+                    "greenhouse_companies": ["stripe", "airbnb"],
+                    "lever_companies": ["netflix"],
                 },
-                files={"resume": ("me.pdf", fh, "application/pdf")},
-                follow_redirects=False,
-            )
-    assert resp.status_code == 303
+                "answer_bank": {},
+            },
+        )
+    assert resp.status_code == 200
 
     # Preferences persisted to YAML.
     saved = Preferences.load(prefs_path)

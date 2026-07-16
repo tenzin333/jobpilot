@@ -13,11 +13,6 @@ from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_assist.db")
 
-from sqlmodel import Session, SQLModel  # noqa: E402
-
-import app.web.intervention as intervention  # noqa: E402
-from app.db import engine  # noqa: E402
-from app.models import Application, ApplicationStatus, Job  # noqa: E402
 from app.submit import assist_session  # noqa: E402
 from app.submit.ashby_assist import fill_form  # noqa: E402
 
@@ -161,46 +156,7 @@ def test_live_streaming_emits_jpeg_frames(tmp_path: Path):
         sess.close()
 
 
-# --- endpoints ----------------------------------------------------------
-
-def _seed_needs_human(preview_answers) -> int:
-    import uuid
-
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as s:
-        job = Job(source="ashby", source_job_id=uuid.uuid4().hex, company="Ramp", title="AI Eng",
-                  dedup_hash=uuid.uuid4().hex, ats_type="ashby",
-                  apply_url="https://jobs.ashbyhq.com/ramp/j/application")
-        s.add(job)
-        s.commit()
-        app = Application(
-            job_id=job.id, status=ApplicationStatus.needs_human.value, match_score=85,
-            resume_path="r.pdf", needs_human_reason="captcha",
-            events=[{"event": "application_preview", "preview": {"answers": preview_answers}}],
-        )
-        s.add(app)
-        s.commit()
-        return app.id
-
-
-def test_live_endpoint_enqueues_and_returns_panel(monkeypatch):
-    from fastapi.testclient import TestClient
-
-    app_id = _seed_needs_human(_ANSWERS)
-    captured = {}
-    monkeypatch.setattr(assist_session, "snapshot", lambda aid: {})  # not active -> enqueue
-    monkeypatch.setattr(assist_session, "enqueue",
-                        lambda aid, url, answers, rp: captured.update(id=aid, answers=answers))
-
-    from app.main import app as fastapi_app
-    with TestClient(fastapi_app) as client:
-        r = client.get(f"/intervention/{app_id}/live")
-        assert r.status_code == 200
-        assert f"/ws/assist/{app_id}" in r.text          # panel wires the websocket
-        assert f"screen-{app_id}" in r.text              # streamed <img>
-        assert captured["id"] == app_id
-        assert captured["answers"] == _ANSWERS
-
-    with Session(engine) as s:
-        s.delete(s.get(Application, app_id))
-        s.commit()
+# The /intervention/{id}/live HTML endpoint that enqueued assist sessions was
+# removed with the server-rendered dashboard. The assist backend (session queue,
+# fill logic, live streaming) is still covered by the tests above; a React
+# intervention UI would drive it through a future /api endpoint.

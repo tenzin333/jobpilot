@@ -1,4 +1,4 @@
-"""Phase 0 acceptance: app boots, tables create, /health and dashboard respond."""
+"""Phase 0 acceptance: app boots, tables create, /health responds, / -> /ui."""
 from __future__ import annotations
 
 import os
@@ -10,13 +10,14 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 
 
-def test_health_and_dashboard():
+def test_health_and_root_redirect():
     with TestClient(app) as client:  # triggers lifespan -> init_db()
         assert client.get("/health").json() == {"status": "ok"}
 
-        resp = client.get("/")
-        assert resp.status_code == 200
-        assert "Dashboard" in resp.text
+        # The React SPA is the only UI; the root redirects to it.
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert resp.headers["location"] == "/ui"
 
 
 def test_tables_created():

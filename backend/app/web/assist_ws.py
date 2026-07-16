@@ -20,6 +20,7 @@ log = logging.getLogger("assist.ws")
 @router.websocket("/ws/assist/{app_id}")
 async def ws_assist(ws: WebSocket, app_id: int) -> None:
     await ws.accept()
+    log.info("Assist websocket connected (app %s)", app_id)
     loop = asyncio.get_running_loop()
     pending: dict = {"fut": None}
 
@@ -43,7 +44,7 @@ async def ws_assist(ws: WebSocket, app_id: int) -> None:
                 break
             assist_session.push_input(app_id, msg)
     except WebSocketDisconnect:
-        pass
+        log.info("Assist websocket disconnected (app %s)", app_id)
     except Exception as exc:  # noqa: BLE001
         log.debug("assist ws error (app %s): %s", app_id, exc)
     finally:

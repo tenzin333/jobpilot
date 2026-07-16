@@ -91,8 +91,8 @@ def test_rank_jobs_orchestration(monkeypatch):
         lambda jobs, profile: {j.id: PrefilterScore(score=8, reason="ok") for j in jobs},
     )
     monkeypatch.setattr(
-        ranking, "deep_score",
-        lambda job, profile: MatchScore(score=85, rationale="strong", gaps=["k8s"]),
+        ranking, "deep_score_batch",
+        lambda jobs, profile: {j.id: MatchScore(score=85, rationale="strong", gaps=["k8s"]) for j in jobs},
     )
 
     stats = rank_jobs(session, profile, prefs)

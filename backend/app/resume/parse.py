@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from app.llm.client import parse_structured
 
+log = logging.getLogger(__name__)
+
 
 class ExperienceItem(BaseModel):
     company: str = ""
@@ -51,7 +53,6 @@ def extract_text(path: Path) -> str:
         import pdfplumber
 
         with pdfplumber.open(str(path)) as pdf:
-            print(f"extracting {"\n".join((page.extract_text() or "") for page in pdf.pages).strip()                                          }")
             return "\n".join((page.extract_text() or "") for page in pdf.pages).strip()
     if suffix in (".docx", ".doc"):
         import docx
@@ -110,7 +111,7 @@ def parse_resume(path: Path) -> dict:
     Falls back to raw-text-only when Claude is unavailable.
     """
     raw_text = extract_text(path)
-    print(f"{raw_text}")
+    log.debug("Extracted %d chars of resume text from %s", len(raw_text), path.name)
     fields: dict = {
         "raw_text": raw_text,
         "base_resume_path": str(path),
@@ -124,11 +125,11 @@ def parse_resume(path: Path) -> dict:
     }
     try:
         extraction = structured_extract(raw_text)
-        print(f"extraction {extraction}")
+        log.debug("Structured extraction succeeded for %s", path.name)
     except Exception as exc:  # noqa: BLE001
         # Never fail a resume upload because extraction errored (no key, network,
         # rate limit, bad model output). Raw text is still stored for the pipeline.
-        logging.getLogger(__name__).warning("Resume extraction failed: %s", exc)
+        log.warning("Resume extraction failed: %s", exc)
         return fields
 
     fields.update(

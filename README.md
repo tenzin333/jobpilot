@@ -15,10 +15,10 @@ frontend/   React + TypeScript + Vite + shadcn/ui SPA (see frontend/README.md)
 .venv/      shared Python virtualenv (repo root)
 ```
 The backend runs from `backend/`; the SPA talks to it over `/api` and is served at
-`/ui` in production. The legacy HTMX dashboard still lives at `/`.
+`/ui` in production. The root `/` redirects to `/ui` — the React SPA is the only UI.
 
 ## Stack
-Python 3.11+ · FastAPI (HTMX dashboard + JSON API) · React + TypeScript + Vite +
+Python 3.11+ · FastAPI (JSON API under `/api`) · React + TypeScript + Vite +
 shadcn/ui · SQLModel over SQLite **or** managed Postgres (Neon) · Playwright
 (scraping, submission, PDF rendering) · Groq / Hugging Face LLM backends (set in `.env`).
 
@@ -36,15 +36,18 @@ copy backend\config\preferences.example.yaml backend\config\preferences.yaml
 ## Run
 ```bash
 cd backend
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload          # or: .\run.ps1 from the repo root
 ```
-Open http://127.0.0.1:8000 (classic dashboard) or the React console at
-http://127.0.0.1:8000/ui once the frontend is built. Then:
+Open the React console at http://127.0.0.1:8000/ui once the frontend is built
+(`cd frontend && npm run build`); http://127.0.0.1:8000/ redirects there. For UI
+development run the Vite dev server instead (`npm run dev`, or `.\run-frontend.ps1`)
+and open http://localhost:5173/ui/ — it proxies `/api` to this backend. Then:
 1. **Setup** — upload your résumé (PDF/DOCX) and set preferences + source slugs.
-2. **Jobs** — *Discover now* to ingest postings.
-3. **Applications** — *Rank now* → *Tailor above threshold* → *Submit tailored*.
-4. **Intervention** — finish anything that needs you, then *Mark done*.
-5. **Pipeline / Settings** — enable the scheduler and tune the controls.
+2. **Jobs** — *Discover now* to ingest postings, then *Rank*.
+3. **Matches** — apply to strong matches (tailor → submit) per card.
+
+All pages — Dashboard, Jobs, Matches, Applications, Intervention, Pipeline,
+Summary, Setup, and Settings — are built in the React SPA.
 
 ## Safety
 - **DRY_RUN** (default on): forms are filled but never finally submitted.
@@ -52,7 +55,9 @@ http://127.0.0.1:8000/ui once the frontend is built. Then:
 - **Per-source autonomy**: disable auto-submit per ATS.
 - **Daily cap**: limits submissions/day. **CAPTCHAs are always routed to you.**
 
-All four are editable live on the **Settings** page (override `.env` defaults).
+`.env` seeds the initial values; all four are then editable live on the
+**Settings** page (persisted via `/api/settings`, applied without a restart) and
+exposed on `/api/dashboard`.
 
 ## Tests
 ```bash
@@ -78,4 +83,4 @@ intervention queue.
 `backend/app/discovery` connectors · `backend/app/pipeline` ingest/normalize/dedup/rank-tailor-submit/orchestrator
 · `backend/app/llm` LLM client + ranking + tailoring · `backend/app/resume` parse + render
 · `backend/app/submit` adapters + intervention detection · `backend/app/tracking` reporting
-· `backend/app/web` HTMX dashboard + JSON API (`api.py`).
+· `backend/app/web` JSON API (`api.py`) + assist websocket (`assist_ws.py`).

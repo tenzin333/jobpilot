@@ -40,6 +40,7 @@ class AtsType(str, Enum):
     themuse = "themuse"
     remotive = "remotive"
     adzuna = "adzuna"
+    linkedin = "linkedin"
 
 
 class Profile(SQLModel, table=True):

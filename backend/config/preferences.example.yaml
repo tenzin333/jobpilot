@@ -86,6 +86,11 @@ sources:
     autonomy: false
     max_pages: 1
 
+  linkedin:
+    enabled: false        # public guest search (no key); rate-limited, apply -> needs_human
+    autonomy: false
+    max_pages: 2
+
   career_pages:
     enabled: false        # opt-in, brittle; submissions route to needs_human
     autonomy: false

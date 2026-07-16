@@ -57,7 +57,10 @@ def _wire_stubs(monkeypatch, *, adapter_result):
 
     monkeypatch.setattr(ingest_mod, "fetch_all", fake_fetch_all)
     monkeypatch.setattr(ranking, "prefilter", lambda jobs, profile: {j.id: PrefilterScore(score=9) for j in jobs})
-    monkeypatch.setattr(ranking, "deep_score", lambda job, profile: MatchScore(score=88, rationale="great"))
+    monkeypatch.setattr(
+        ranking, "deep_score_batch",
+        lambda jobs, profile: {j.id: MatchScore(score=88, rationale="great") for j in jobs},
+    )
     monkeypatch.setattr(tailor_pipeline, "tailor", lambda job, profile: (TailoredResume(summary="ok", cover_letter="hi"), []))
     monkeypatch.setattr(tailor_pipeline, "render_resume_pdf", lambda t, p, out: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"%PDF"), out)[-1])
     monkeypatch.setattr(tailor_pipeline, "render_cover_letter_pdf", lambda t, j, p, out: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"%PDF"), out)[-1])

@@ -103,6 +103,66 @@ export interface SetupPayload {
   answer_bank: Record<string, string>;
 }
 
+export interface SettingsData {
+  dry_run: boolean;
+  submit_kill_switch: boolean;
+  scheduler_enabled: boolean;
+  daily_submit_cap: number;
+  match_threshold: number;
+  cycle_interval_minutes: number;
+}
+
+export interface ApplicationRow {
+  id: number;
+  title: string;
+  company: string;
+  location: string;
+  source: string;
+  apply_url: string;
+  status: string;
+  match_score: number | null;
+  score_rationale: string;
+  error: string;
+  has_resume: boolean;
+  has_cover_letter: boolean;
+  submitted_at: string | null;
+  state: StatusState;
+  can_retry: boolean;
+}
+
+export interface InterventionItem {
+  id: number;
+  title: string;
+  company: string;
+  apply_url: string;
+  source: string;
+  ats_type: string;
+  reason: string;
+  has_resume: boolean;
+}
+
+export interface AssistSnapshot {
+  stage?: "queued" | "opening" | "live" | "done" | "error";
+  queue_pos?: number;
+  filled?: number;
+  missed?: string[];
+  done?: boolean;
+  error?: string;
+}
+
+export interface SummaryData {
+  day: string;
+  discovered: number;
+  ranked: number;
+  tailored: number;
+  submitted: number;
+  failed_today: number;
+  needs_human_today: number;
+  needs_human_open: number;
+  top_matches: { score: number | null; company: string; title: string; status: string }[];
+  email_configured: boolean;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -151,4 +211,38 @@ export const api = {
     }
     return res.json() as Promise<{ profile: SetupProfile | null; answer_bank: Record<string, string> }>;
   },
+
+  getSettings: () => request<SettingsData>("/settings"),
+  saveSettings: (payload: SettingsData) =>
+    request<SettingsData>("/settings", { method: "POST", body: JSON.stringify(payload) }),
+
+  // Pipeline
+  pipelineRun: () =>
+    request<{ ok: boolean; started: boolean; running: boolean }>("/pipeline/run", { method: "POST" }),
+
+  // Applications
+  applications: () => request<{ applications: ApplicationRow[] }>("/applications"),
+  tailor: () => request<{ ok: boolean; tailored: number }>("/applications/tailor", { method: "POST" }),
+  submit: () => request<{ ok: boolean; submitted: number }>("/applications/submit", { method: "POST" }),
+  artifactUrl: (appId: number, artifact: "resume" | "cover_letter") =>
+    `/api/applications/${appId}/${artifact}`,
+
+  // Intervention
+  intervention: () => request<{ items: InterventionItem[] }>("/intervention"),
+  interventionDone: (appId: number) =>
+    request<{ ok: boolean }>(`/intervention/${appId}/done`, { method: "POST" }),
+
+  // Assist co-browse
+  assistStart: (appId: number) =>
+    request<AssistSnapshot>(`/intervention/${appId}/assist`, { method: "POST" }),
+  assistStatus: (appId: number) =>
+    request<AssistSnapshot>(`/intervention/${appId}/assist-status`),
+  assistWsUrl: (appId: number) => {
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${proto}://${window.location.host}/ws/assist/${appId}`;
+  },
+
+  // Summary
+  summary: () => request<SummaryData>("/summary"),
+  emailSummary: () => request<{ ok: boolean; sent: boolean }>("/summary/email", { method: "POST" }),
 };

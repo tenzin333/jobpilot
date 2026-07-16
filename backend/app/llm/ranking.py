@@ -9,7 +9,6 @@ UI can show it live, and deep scores commit per-job so cards fill in gradually.
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
 
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
@@ -39,6 +38,17 @@ class MatchScore(BaseModel):
     score: int = Field(ge=0, le=100, description="Match 0-100")
     rationale: str = ""
     gaps: list[str] = Field(default_factory=list)
+
+
+class DeepItem(BaseModel):
+    ref: int
+    score: int = Field(default=0, ge=0, le=100)
+    rationale: str = ""
+    gaps: list[str] = Field(default_factory=list)
+
+
+class BatchDeep(BaseModel):
+    scores: list[DeepItem] = Field(default_factory=list)
 
 
 # --- hard filters (no LLM) ----------------------------------------------
@@ -121,7 +131,7 @@ def _batch_brief(job: Job) -> str:
 
 
 def prefilter(
-    jobs: list[Job], profile: Profile, group_size: int = 10
+    jobs: list[Job], profile: Profile, group_size: int = 20
 ) -> dict[int, PrefilterScore]:
     """Score candidates 0-10 in batches of `group_size` per LLM call.
 
@@ -142,7 +152,7 @@ def prefilter(
         try:
             batch = parse_structured(
                 system=system, user=user, schema=BatchPrefilter,
-                tier="fast", cache_system=False, max_tokens=600,
+                tier="fast", cache_system=False, max_tokens=1000,
             )
             for item in batch.scores:
                 jid = refmap.get(item.ref)
@@ -173,6 +183,55 @@ def deep_score(job: Job, profile: Profile) -> MatchScore:
         max_tokens=700,  # score + rationale + gaps; small output fits the 8B free-tier cap
         cache_system=True,
     )
+
+
+_DEEP_BATCH_SYSTEM_SUFFIX = (
+    "\n\nScore how well this candidate matches EACH job below from 0-100, using "
+    "ONLY the candidate's real experience and skills above. For every job ref "
+    "number return a score, a one-sentence rationale, and concrete gaps. Do not "
+    "reward skills the candidate does not have. Return a result for every ref."
+)
+
+
+def _deep_brief(job: Job) -> str:
+    return (
+        f"Company: {job.company}\nTitle: {job.title}\nLocation: {job.location}\n"
+        f"Remote: {job.remote}\nDescription:\n{job.description[:1500]}"
+    )
+
+
+def deep_score_batch(
+    jobs: list[Job], profile: Profile, group_size: int = 8
+) -> dict[int, MatchScore]:
+    """Deep-score jobs 0-100 (+ rationale, gaps) in BATCHES of `group_size` per LLM
+    call — one request scores many jobs instead of one-per-job. Keyed by job.id;
+    a failed group is skipped (those jobs keep their prefilter score)."""
+    if not jobs:
+        return {}
+    system = build_profile_prefix(profile) + _DEEP_BATCH_SYSTEM_SUFFIX
+    groups = [jobs[i : i + group_size] for i in range(0, len(jobs), group_size)]
+    out: dict[int, MatchScore] = {}
+
+    for group in groups:
+        refmap = {idx: job.id for idx, job in enumerate(group, start=1)}
+        lines = [f"[{idx}] {_deep_brief(job)}" for idx, job in enumerate(group, start=1)]
+        user = "Score each job below.\n\n" + "\n\n".join(lines)
+        try:
+            batch = parse_structured(
+                system=system, user=user, schema=BatchDeep,
+                tier="fast", cache_system=False, max_tokens=1500,
+            )
+        except Exception:  # noqa: BLE001 — skip a failed group, keep the prefilter score
+            continue
+        for item in batch.scores:
+            jid = refmap.get(item.ref)
+            if jid is not None:
+                out[jid] = MatchScore(
+                    score=max(0, min(100, item.score)),
+                    rationale=item.rationale,
+                    gaps=item.gaps,
+                )
+    return out
 
 
 # --- orchestration ------------------------------------------------------
@@ -231,29 +290,19 @@ def rank_jobs(
         ranked += 1
         PIPELINE_STATE.update_stats(ranked=ranked)
 
-    # 2. Upgrade the top few with a deep score + rationale. LLM calls run
-    #    concurrently (fast 8B tier); DB commits stay on this thread. Best-effort:
-    #    a failed call just leaves the prefilter score in place.
+    # 2. Upgrade the top few with a deep score + rationale, BATCHED (a handful of
+    #    LLM calls instead of one-per-job) to stay well within free-tier request
+    #    limits. Best-effort: a failed group just leaves the prefilter score.
     to_deep = survivors[:deep_keep]
-
-    def _ds(job: Job) -> tuple[int, MatchScore | None]:
-        try:
-            return job.id, deep_score(job, profile)
-        except Exception:  # noqa: BLE001
-            return job.id, None
-
     if to_deep:
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            for job_id, score in pool.map(_ds, to_deep):
-                if score is None:
-                    continue
-                app = apps[job_id]
-                app.match_score = score.score
-                app.score_rationale = score.rationale
-                app.gaps = score.gaps
-                session.add(app)
-                session.commit()
-                PIPELINE_STATE.log(f"Deep-scored job {job_id} -> {score.score}")
+        for job_id, score in deep_score_batch(to_deep, profile).items():
+            app = apps[job_id]
+            app.match_score = score.score
+            app.score_rationale = score.rationale
+            app.gaps = score.gaps
+            session.add(app)
+            session.commit()
+            PIPELINE_STATE.log(f"Deep-scored job {job_id} -> {score.score}")
 
     return {
         "candidates": len(candidates),
