@@ -2,7 +2,7 @@
 
 Two steps:
 1. Extract raw text (pdfplumber for PDF, python-docx for DOCX).
-2. Use an Opus structured-output pass to produce clean structured fields.
+2. Use a structured-output pass to produce clean structured fields.
 
 If Claude is unavailable (no API key), we still store raw text + empty structured
 fields so the app remains usable for the rest of setup.
@@ -15,6 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from app.llm.client import parse_structured
+from app.models import split_full_name
 
 log = logging.getLogger(__name__)
 
@@ -99,8 +100,10 @@ def structured_extract(raw_text: str) -> ResumeExtraction:
         system=_EXTRACT_SYSTEM,
         user=f"Resume text:\n\n{raw_text[:8000]}",
         schema=ResumeExtraction,
-        tier="fast",        # 8B: extraction is simple + the 70B free tier is rate-limited
-        max_tokens=2000,    # bounded output to fit the free-tier per-request cap
+        tier="fast",
+        # A complete profile with several roles cannot fit in the generic 256-token
+        # structured-call default. The model stops early when the JSON is complete.
+        max_tokens=4096,
         cache_system=False,
     )
 
@@ -116,6 +119,10 @@ def parse_resume(path: Path) -> dict:
         "raw_text": raw_text,
         "base_resume_path": str(path),
         "full_name": "",
+        "honorific": "",
+        "first_name": "",
+        "middle_name": "",
+        "last_name": "",
         "email": "",
         "phone": "",
         "skills": [],
@@ -132,8 +139,13 @@ def parse_resume(path: Path) -> dict:
         log.warning("Resume extraction failed: %s", exc)
         return fields
 
+    honorific, first_name, middle_name, last_name = split_full_name(extraction.full_name)
     fields.update(
         full_name=extraction.full_name,
+        honorific=honorific,
+        first_name=first_name,
+        middle_name=middle_name,
+        last_name=last_name,
         email=extraction.email,
         phone=extraction.phone,
         skills=extraction.skills,

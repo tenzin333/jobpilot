@@ -172,7 +172,7 @@ def plan_ashby_answers(fields: list[AshbyField], profile: Profile) -> dict[str, 
             user="Fill these fields:\n" + _fields_for_prompt(answerable),
             schema=AnswerSet,
             cache_system=False,
-            max_tokens=1500,
+            max_tokens=256,
         )
         by = {a.name: a for a in plan.answers}
     _backfill_core(by, fields, profile)

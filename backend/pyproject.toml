@@ -22,6 +22,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# JobSpy 1.1.82 pins NumPy 1.26.3; use Python 3.11 or 3.12 for this extra.
+jobspy = [
+    "python-jobspy==1.1.82",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

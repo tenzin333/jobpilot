@@ -66,6 +66,13 @@ def submit_one(
         session.add(app)
         session.commit()
         return "failed"
+    if settings.test_ats_enabled:
+        reason = "real submission blocked while local test ATS mode is enabled"
+        _record(app, ApplicationStatus.needs_human.value, {"event": "needs_human", "reason": reason})
+        app.needs_human_reason = reason
+        session.add(app)
+        session.commit()
+        return "needs_human"
 
     is_greenhouse = job.ats_type == AtsType.greenhouse.value
     is_ashby = job.ats_type == AtsType.ashby.value
@@ -129,17 +136,18 @@ def submit_one(
 def submit_tailored(
     session: Session, profile: Profile, prefs: Preferences, settings: Settings
 ) -> dict[str, int]:
+    if settings.test_ats_enabled:
+        from app.pipeline.test_apply import Coordinator
+        return Coordinator(session.get_bind()).bulk()
     stats = {"submitted": 0, "dry_run": 0, "needs_human": 0, "failed": 0, "skipped_cap": 0}
 
     if settings.submit_kill_switch:
         return stats
-
     remaining = settings.daily_submit_cap - _submitted_today(session)
 
     apps = session.exec(
         select(Application).where(Application.status == ApplicationStatus.tailored.value)
     ).all()
-
     for app in apps:
         outcome = submit_one(session, app, profile, prefs, settings, remaining_cap=remaining)
         if outcome in stats:

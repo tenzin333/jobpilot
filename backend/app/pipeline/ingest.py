@@ -18,6 +18,7 @@ from app.discovery.career_pages import CareerPagesConnector
 from app.discovery.greenhouse import GreenhouseConnector
 from app.discovery.lever import LeverConnector
 from app.discovery.linkedin import LinkedInConnector
+from app.discovery.all_jobs import AllJobsConnector
 from app.discovery.remotive import RemotiveConnector
 from app.discovery.smartrecruiters import SmartRecruitersConnector
 from app.discovery.themuse import TheMuseConnector
@@ -44,6 +45,7 @@ SEARCH_CONNECTORS = {
     AtsType.remotive.value: RemotiveConnector(),
     AtsType.adzuna.value: AdzunaConnector(),
     AtsType.linkedin.value: LinkedInConnector(),
+    AtsType.all_jobs.value: AllJobsConnector(),
 }
 
 
@@ -54,6 +56,7 @@ _CAREER = CareerPagesConnector()
 # aggregators first (self-contained — no per-company config needed), then the
 # company-slug ATS boards, then generic career pages.
 KNOWN_SOURCES: list[str] = [
+    AtsType.all_jobs.value,
     AtsType.themuse.value, AtsType.remotive.value, AtsType.adzuna.value, AtsType.linkedin.value,
     AtsType.greenhouse.value, AtsType.lever.value, AtsType.ashby.value,
     AtsType.smartrecruiters.value, AtsType.workable.value,

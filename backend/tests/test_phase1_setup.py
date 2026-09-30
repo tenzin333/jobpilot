@@ -73,6 +73,17 @@ def test_setup_roundtrip_pdf(tmp_path: Path, monkeypatch):
                 files={"resume": ("me.pdf", fh, "application/pdf")},
             )
         assert up.status_code == 200
+        review = up.json()["candidate_profile"]
+        assert review["status"] == "pending"
+        assert review["has_pending"] is True
+
+        # The LLM interpretation is staged until the user reviews and approves it.
+        approved = client.post(
+            "/api/candidate-profile/approve",
+            json={"candidate": review["candidate"]},
+        )
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "approved"
 
         # 2. Save preferences + answer bank as JSON (what the React setup form posts).
         resp = client.post(
@@ -99,7 +110,7 @@ def test_setup_roundtrip_pdf(tmp_path: Path, monkeypatch):
     assert saved.min_salary == 150000
     assert saved.sources["greenhouse"].companies == ["stripe", "airbnb"]
 
-    # Profile created with raw text from the uploaded PDF resume.
+    # Approval promoted the reviewed profile and original resume into operational state.
     with Session(engine) as session:
         profile = session.exec(select(Profile)).first()
     assert profile is not None

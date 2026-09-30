@@ -35,6 +35,10 @@ class LLMError(RuntimeError):
     pass
 
 
+class LLMTruncatedError(LLMError):
+    """The provider exhausted the output budget before completing the response."""
+
+
 def _chat(
     messages: list[dict], tier: str, max_tokens: int,
     model_override: str | None = None, json_mode: bool = False,
@@ -56,13 +60,15 @@ def _chat(
         url = base_url.rstrip("/") + "/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.0}
+        if settings.openai_reasoning_effort:
+            payload["reasoning_effort"] = settings.openai_reasoning_effort
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
         last = ""
         for attempt in range(4):
             try:
-                resp = httpx.post(url, json=payload, headers=headers, timeout=60)
+                resp = httpx.post(url, json=payload, headers=headers, timeout=settings.openai_timeout_seconds)
             except httpx.HTTPError as exc:
                 last = str(exc)
                 log.warning("LLM %s network error (attempt %d/4): %s", model, attempt + 1, exc)
@@ -82,7 +88,10 @@ def _chat(
             if resp.status_code >= 400:
                 log.warning("LLM %s failed %s: %s", model, resp.status_code, resp.text[:200])
                 raise LLMError(f"LLM request failed {resp.status_code}: {resp.text[:200]}")
-            content = resp.json()["choices"][0]["message"]["content"] or ""
+            choice = resp.json()["choices"][0]
+            if choice.get("finish_reason") == "length":
+                raise LLMTruncatedError(f"LLM {model} response truncated at max_tokens={max_tokens}")
+            content = choice["message"]["content"] or ""
             log.info("LLM %s ok (%d chars): %r", model, len(content), content[:160])
             return content
         log.error("LLM %s failed after retries (last=%s)", model, last)
@@ -99,6 +108,8 @@ def _chat(
     except Exception as exc:  # noqa: BLE001
         log.warning("LLM (HF) %s failed: %s", model, exc)
         raise LLMError(f"HF request failed: {exc}") from exc
+    if resp.choices[0].finish_reason == "length":
+        raise LLMTruncatedError(f"LLM {model} response truncated at max_tokens={max_tokens}")
     return resp.choices[0].message.content or ""
 
 
@@ -158,7 +169,16 @@ def _complete_structured(
 
     last_err: Exception | None = None
     for attempt in range(2):
-        text = _chat(messages, tier, max_tokens, model_override=model_override, json_mode=True)
+        try:
+            text = _chat(messages, tier, max_tokens, model_override=model_override, json_mode=True)
+        except LLMTruncatedError as exc:
+            last_err = exc
+            log.warning("Structured response for %s attempt %d truncated at max_tokens=%d",
+                        schema.__name__, attempt + 1, max_tokens)
+            if attempt == 0:
+                max_tokens *= 2
+                log.info("Retrying %s with max_tokens=%d", schema.__name__, max_tokens)
+            continue
         try:
             return schema.model_validate(json.loads(_extract_json(text)))
         except (json.JSONDecodeError, ValidationError) as exc:
@@ -181,7 +201,7 @@ def parse_structured(
     user: str,
     schema: type[T],
     model: str | None = None,
-    max_tokens: int = 8000,
+    max_tokens: int = 256,
     tier: str = "quality",
     cache_system: bool = True,  # accepted for compatibility; no HF equivalent
     thinking: bool = True,      # accepted for compatibility; ignored

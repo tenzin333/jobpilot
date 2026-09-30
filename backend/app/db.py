@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from sqlalchemy import event
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import get_settings
@@ -36,11 +36,39 @@ if _is_sqlite:
         cur.close()
 
 
-def init_db() -> None:
-    """Import models for table registration, then create all tables."""
+_CANDIDATE_REVIEW_COLUMNS = {
+    "approved_resume_path": ("VARCHAR NOT NULL DEFAULT ''", "VARCHAR NOT NULL DEFAULT ''"),
+    "approved_raw_text": ("VARCHAR NOT NULL DEFAULT ''", "VARCHAR NOT NULL DEFAULT ''"),
+    "approved_answer_bank": ("JSON NOT NULL DEFAULT '{}'", "JSON NOT NULL DEFAULT '{}'::json"),
+    "approved_source_filename": ("VARCHAR NOT NULL DEFAULT ''", "VARCHAR NOT NULL DEFAULT ''"),
+}
+
+
+def ensure_schema(target_engine=engine) -> None:
+    """Create new tables and apply the small compatibility upgrades we own."""
     import app.models  # noqa: F401  (registers tables on SQLModel.metadata)
 
-    SQLModel.metadata.create_all(engine)
+    SQLModel.metadata.create_all(target_engine)
+    with target_engine.begin() as connection:
+        inspector = inspect(connection)
+        table = "candidate_profile_review"
+        if table not in inspector.get_table_names():
+            return
+        existing = {column["name"] for column in inspector.get_columns(table)}
+        postgres = connection.dialect.name == "postgresql"
+        for name, (portable_type, postgres_type) in _CANDIDATE_REVIEW_COLUMNS.items():
+            if name in existing:
+                continue
+            column_type = postgres_type if postgres else portable_type
+            if_exists = " IF NOT EXISTS" if postgres else ""
+            connection.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN{if_exists} {name} {column_type}"
+            ))
+
+
+def init_db() -> None:
+    """Initialize the configured database schema."""
+    ensure_schema(engine)
 
 
 def get_session() -> Iterator[Session]:

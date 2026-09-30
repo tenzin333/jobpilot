@@ -21,6 +21,7 @@ class RawJob(BaseModel):
     description: str = ""
     apply_url: str = ""
     raw: dict[str, Any] = Field(default_factory=dict)
+    job_type: str = ""
 
 
 class Connector(Protocol):

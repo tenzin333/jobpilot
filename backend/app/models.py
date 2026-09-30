@@ -20,6 +20,19 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def split_full_name(value: str) -> tuple[str, str, str, str]:
+    """Return honorific, first, middle, and last parts for form bindings."""
+    parts = str(value or "").split()
+    honorific = ""
+    if parts and parts[0].rstrip(".").casefold() in {"mr", "mrs", "ms", "miss", "mx", "dr", "prof"}:
+        honorific = parts.pop(0)
+    if not parts:
+        return honorific, "", "", ""
+    if len(parts) == 1:
+        return honorific, parts[0], "", ""
+    return honorific, parts[0], " ".join(parts[1:-1]), parts[-1]
+
+
 class ApplicationStatus(str, Enum):
     ranked = "ranked"
     tailored = "tailored"
@@ -41,6 +54,7 @@ class AtsType(str, Enum):
     remotive = "remotive"
     adzuna = "adzuna"
     linkedin = "linkedin"
+    all_jobs = "alljobs"
 
 
 class Profile(SQLModel, table=True):
@@ -68,6 +82,28 @@ class Profile(SQLModel, table=True):
     # used to fill arbitrary form fields. See app/llm/answers.py.
     answer_bank: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class CandidateProfileReview(SQLModel, table=True):
+    """Durable review state for the LLM's interpretation of a resume."""
+
+    __tablename__ = "candidate_profile_review"
+
+    id: int = Field(default=1, primary_key=True)
+    status: str = Field(default="pending", index=True)
+    pending_profile: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    approved_profile: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    pending_resume_path: str = ""
+    pending_raw_text: str = ""
+    pending_answer_bank: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    approved_resume_path: str = ""
+    approved_raw_text: str = ""
+    approved_answer_bank: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    source_filename: str = ""
+    approved_source_filename: str = ""
+    generated_at: datetime = Field(default_factory=utcnow)
+    approved_at: datetime | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -108,6 +144,34 @@ class Application(SQLModel, table=True):
     events: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class TestExecution(SQLModel, table=True):
+    """Local execution history. Nullable unique slot enforces one active run/app."""
+    __tablename__ = "test_execution"
+    __table_args__ = (UniqueConstraint("active_application_id", name="uq_test_execution_active"),)
+    id: str = Field(primary_key=True)
+    application_id: int = Field(foreign_key="application.id", index=True)
+    active_application_id: int | None = Field(default=None, index=True)
+    mode: str = "test"
+    state: str = Field(default="queued", index=True)
+    scenario: str
+    workflow_version: str = "1"
+    current_step: str = ""
+    reason_code: str = "queued"
+    review_version: int = 0
+    review_digest: str = ""
+    unresolved_fields: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    answers: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    artifact_refs: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
+    trace: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    receipt: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime | None = None
+    resume_attempts: int = 0
+    target_choices: dict[str, list[dict[str, str]]] = Field(default_factory=dict, sa_column=Column(JSON))
+    selected_targets: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
 
 
 class Control(SQLModel, table=True):

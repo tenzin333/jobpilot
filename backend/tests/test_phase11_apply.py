@@ -23,6 +23,7 @@ from app.models import Application, ApplicationStatus, Job, Profile  # noqa: E40
 from app.pipeline import submit as submit_pipeline  # noqa: E402
 from app.pipeline.submit import submit_one  # noqa: E402
 from app.submit.base import DryRunFilled, Submitted  # noqa: E402
+from app.submit.test_ats import fixture_url  # noqa: E402
 
 
 def _session() -> Session:
@@ -65,7 +66,9 @@ def test_submit_one_live(monkeypatch):
     # Greenhouse now uses the schema-driven submitter; mock it.
     import app.submit.greenhouse_api as gha
     monkeypatch.setattr(gha, "build_and_submit", lambda job, profile, settings: (Submitted(), {}))
-    outcome = submit_one(session, app, profile, _prefs(), Settings(dry_run=False))
+    outcome = submit_one(
+        session, app, profile, _prefs(), Settings(dry_run=False, test_ats_enabled=False)
+    )
     assert outcome == "submitted"
     session.refresh(app)
     assert app.status == ApplicationStatus.submitted.value
@@ -86,8 +89,43 @@ def test_submit_one_cap(monkeypatch):
     session = _session()
     app, profile = _tailored_app(session)
     monkeypatch.setitem(submit_pipeline.ADAPTERS, "greenhouse", _FakeAdapter(Submitted()))
-    outcome = submit_one(session, app, profile, _prefs(), Settings(dry_run=False), remaining_cap=0)
+    outcome = submit_one(
+        session,
+        app,
+        profile,
+        _prefs(),
+        Settings(dry_run=False, test_ats_enabled=False),
+        remaining_cap=0,
+    )
     assert outcome == "skipped_cap"
+
+
+def test_submit_one_blocks_real_adapter_in_test_ats_mode(monkeypatch):
+    session = _session()
+    app, profile = _tailored_app(session)
+    import app.submit.greenhouse_api as gha
+    monkeypatch.setattr(
+        gha,
+        "build_and_submit",
+        lambda *args, **kwargs: pytest.fail("real submitter must not run"),
+    )
+
+    outcome = submit_one(session, app, profile, _prefs(), Settings(test_ats_enabled=True))
+
+    assert outcome == "needs_human"
+    session.refresh(app)
+    assert app.status == ApplicationStatus.needs_human.value
+    assert "local test ATS mode" in app.needs_human_reason
+
+
+def test_fixture_url_is_stable_and_covers_scenarios():
+    urls = [fixture_url(job_id, "http://localhost:3000/") for job_id in range(1, 5)]
+    assert urls == [
+        "http://localhost:3000/test-ats/basic",
+        "http://localhost:3000/test-ats/multistep",
+        "http://localhost:3000/test-ats/weird-ui",
+        "http://localhost:3000/test-ats/dynamic",
+    ]
 
 
 def test_apply_one_double_submit_guarded():
@@ -175,6 +213,7 @@ def test_retry_endpoint_resets_failed(monkeypatch):
 
     import app.web.api as api_mod
     monkeypatch.setattr(api_mod, "apply_one", lambda app_id: "ok")  # don't run the real pipeline
+    monkeypatch.setattr(api_mod, "get_settings", lambda: Settings(test_ats_enabled=False))
 
     from app.main import app as fastapi_app
     with TestClient(fastapi_app) as client:

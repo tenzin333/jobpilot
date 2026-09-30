@@ -39,6 +39,11 @@ def apply_one(app_id: int) -> str:
 
 
 def _apply_one(app_id: int) -> str:
+    from app.config import get_settings
+    if get_settings().test_ats_enabled:
+        from app.pipeline.test_apply import Coordinator
+        _, created = Coordinator(engine).start(app_id)
+        return "queued_test" if created else "already_active"
     with Session(engine) as session:
         app = session.get(Application, app_id)
         if app is None:

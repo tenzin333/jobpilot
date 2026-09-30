@@ -19,6 +19,12 @@ def test_health_and_root_redirect():
         assert resp.status_code in (302, 307)
         assert resp.headers["location"] == "/ui"
 
+        # Direct navigation to a client-side route returns the SPA entry point.
+        profile_route = client.get("/ui/profile")
+        if profile_route.status_code != 404:  # frontend/dist is optional in a backend-only checkout
+            assert profile_route.status_code == 200
+            assert '<div id="root"></div>' in profile_route.text
+
 
 def test_tables_created():
     from sqlalchemy import inspect
@@ -27,4 +33,4 @@ def test_tables_created():
 
     init_db()
     tables = set(inspect(engine).get_table_names())
-    assert {"profile", "job", "application", "run"} <= tables
+    assert {"profile", "candidate_profile_review", "job", "application", "run"} <= tables

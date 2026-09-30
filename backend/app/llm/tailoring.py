@@ -54,7 +54,7 @@ def tailor(job: Job, profile: Profile) -> tuple[TailoredResume, list[str]]:
         f"Description:\n{job.description[:4000]}"
     )
     tailored = parse_structured(
-        system=system, user=user, schema=TailoredResume, cache_system=True, max_tokens=2500
+        system=system, user=user, schema=TailoredResume, cache_system=True, max_tokens=4096
     )
 
     removed = verify_no_fabrication(tailored, profile)

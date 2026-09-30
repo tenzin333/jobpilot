@@ -26,9 +26,10 @@ class Settings(BaseSettings):
 
     # Default backend for both tiers: "hf" | "openai" | "groq".
     # Override per tier with fast_backend / quality_backend.
-    llm_backend: str = "hf"
-    fast_backend: str = ""      # e.g. "groq" for the high-volume prefilter
-    quality_backend: str = ""   # e.g. "groq" or "hf" for tailoring/answers
+    llm_backend: str = "openai"
+    fast_backend: str = "openai"      # e.g. "groq" for the high-volume prefilter
+    quality_backend: str = "openai"   # e.g. "groq" or "hf" for tailoring/answers
+
 
     # Hugging Face Inference Providers
     hf_token: str = ""
@@ -43,10 +44,15 @@ class Settings(BaseSettings):
     groq_fast_model: str = "llama-3.1-8b-instant"
 
     # Generic OpenAI-compatible backend (Ollama, Gemini, OpenRouter, OpenAI, ...)
-    openai_base_url: str = ""        # e.g. http://localhost:11434/v1
+    openai_base_url: str = "http://localhost:11434/v1"        # e.g. http://localhost:11434/v1
     openai_api_key: str = ""
-    openai_quality_model: str = ""
-    openai_fast_model: str = ""
+    openai_quality_model: str = "qwen3:8b"
+    openai_fast_model: str = "qwen3:8b"
+    # Optional Chat Completions control for reasoning models. Ollama Qwen3 uses
+    # "none" to reserve the output budget for schema-valid JSON.
+    openai_reasoning_effort: str = ""
+    # Local models can take several minutes to generate a full resume and letter.
+    openai_timeout_seconds: float = Field(default=300, gt=0)
 
     def resolve_tier(self, tier: str) -> tuple[str, str, str, str]:
         """Return (kind, model, base_url, api_key) for tier in {"fast","quality"}.
@@ -77,6 +83,12 @@ class Settings(BaseSettings):
     daily_submit_cap: int = 40
     match_threshold: int = 70
 
+    # Local ATS fixtures. When enabled, Apply opens a fixture and every real
+    # submission adapter is blocked as a defense-in-depth safety measure.
+    test_ats_enabled: bool = False
+    test_ats_base_url: str = "http://localhost:3000"
+    test_review_timeout_seconds: int = Field(default=900, ge=5, le=86400)
+
     # Orchestrator
     cycle_interval_minutes: int = 60
 
@@ -84,7 +96,7 @@ class Settings(BaseSettings):
     # into the dashboard. Default to REAL headed Chrome positioned off-screen —
     # an authentic fingerprint (passes ATS anti-bot) with no visible window.
     assist_user_data_dir: str = "./.assist_profile"
-    assist_headless: bool = False
+    assist_headless: bool = True
     assist_hide_window: bool = True
     assist_channel: str = "chrome"  # installed Google Chrome; falls back to Chromium
 

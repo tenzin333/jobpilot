@@ -9,7 +9,13 @@ is created), so each session starts from an empty db.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+# The developer's .env intentionally enables the local ATS. Unit tests opt into
+# it with explicit settings/fakes; unrelated submission tests stay live-mode.
+os.environ["TEST_ATS_ENABLED"] = "false"
+os.environ["SUBMIT_KILL_SWITCH"] = "false"
 
 _BACKEND = Path(__file__).resolve().parent.parent
 

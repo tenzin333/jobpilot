@@ -140,7 +140,7 @@ def plan_answers(questions: list[Question], profile: Profile) -> tuple[AnswerSet
         user="Fill these fields:\n" + _questions_for_prompt(questions),
         schema=AnswerSet,
         cache_system=False,
-        max_tokens=2000,
+        max_tokens=256,
     )
 
     by_name = {a.name: a for a in plan.answers}

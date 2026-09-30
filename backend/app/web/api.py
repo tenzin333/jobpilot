@@ -8,18 +8,25 @@ from __future__ import annotations
 
 import logging
 import os
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, delete, func, or_, select
 
+from app.candidate_brain.models import Candidate
+from app.candidate_brain.services import ProfileReview, candidate_from_profile, candidate_from_resume_fields
+from app.config import get_settings
 from app.controls import effective_settings, get_or_create_control, update_control
 from app.db import engine
-from app.models import Application, ApplicationStatus, Job, Profile, utcnow
+from app.models import Application, ApplicationStatus, Job, Profile, TestExecution, utcnow
 from app.pipeline.apply import apply_one
 from app.pipeline.orchestrator import start_discover_and_rank
 from app.pipeline.state import PIPELINE_STATE, apply_progress, apply_start
+from app.submit.test_ats import fixture_url
+from app.pipeline.test_apply import Coordinator
+from app.web.test_executions import call as execution_call
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger("api")
@@ -233,30 +240,30 @@ def jobs_list() -> dict:
             .order_by(Application.match_score.desc(), Job.discovered_at.desc())
         ).all()
         running = PIPELINE_STATE.snapshot()["running"]
-        jobs = []
-        for job, app in rows:
-            application = None
-            if app is not None:
-                application = {
-                    "id": app.id,
-                    "status": app.status,
-                    "match_score": app.match_score,
-                    "score_rationale": app.score_rationale,
-                    "state": status_state(app.id, app.status),
-                    "can_apply": app.status in ("ranked", "tailored"),
-                }
-            jobs.append(
-                {
-                    "id": job.id,
-                    "title": job.title,
-                    "company": job.company,
-                    "location": job.location,
-                    "source": job.source,
-                    "remote": job.remote,
-                    "apply_url": job.apply_url,
-                    "application": application,
-                }
-            )
+    jobs = []
+    for job, app in rows:
+        application = None
+        if app is not None:
+            application = {
+                "id": app.id,
+                "status": app.status,
+                "match_score": app.match_score,
+                "score_rationale": app.score_rationale,
+                "state": status_state(app.id, app.status),
+                "can_apply": app.status in ("ranked", "tailored"),
+            }
+        jobs.append(
+            {
+                "id": job.id,
+                "title": job.title,
+                "company": job.company,
+                "location": job.location,
+                "source": job.source,
+                "remote": job.remote,
+                "apply_url": job.apply_url,
+                "application": application,
+            }
+        )
     from app.config import get_preferences
     from app.pipeline.ingest import all_sources
 
@@ -298,6 +305,9 @@ def jobs_discover() -> dict:
 @router.post("/jobs/clear")
 def jobs_clear() -> dict:
     with Session(engine) as session:
+        if session.exec(select(TestExecution).where(TestExecution.active_application_id != None)).first():
+            raise HTTPException(status_code=409, detail="Cancel active local executions before clearing jobs")
+        session.exec(delete(TestExecution))
         apps_deleted = session.exec(delete(Application)).rowcount
         jobs_deleted = session.exec(delete(Job)).rowcount
         session.commit()
@@ -330,6 +340,15 @@ def matches_apply(app_id: int, background_tasks: BackgroundTasks) -> dict:
             log.warning("Apply requested for unknown application %s", app_id)
             raise HTTPException(status_code=404)
         status = app.status
+        job_id = app.job_id
+    settings = get_settings()
+    if settings.test_ats_enabled:
+        execution, _ = execution_call(Coordinator(engine).start, app_id)
+        return {
+            **status_state(app_id, status),
+            "test_apply_url": fixture_url(job_id, settings.test_ats_base_url),
+            "test_execution": execution,
+        }
     log.info("Apply queued for application %s (status=%s)", app_id, status)
     apply_start(app_id)
     background_tasks.add_task(apply_one, app_id)
@@ -353,6 +372,14 @@ def matches_retry(app_id: int, background_tasks: BackgroundTasks) -> dict:
         if app is None:
             log.warning("Retry requested for unknown application %s", app_id)
             raise HTTPException(status_code=404)
+        settings = get_settings()
+        if settings.test_ats_enabled:
+            execution, _ = execution_call(Coordinator(engine).start, app_id)
+            return {
+                **status_state(app_id, app.status),
+                "test_apply_url": fixture_url(app.job_id, settings.test_ats_base_url),
+                "test_execution": execution,
+            }
         if app.status in (ApplicationStatus.failed.value, ApplicationStatus.needs_human.value):
             app.status = (
                 ApplicationStatus.tailored.value if app.resume_path
@@ -404,6 +431,19 @@ def _profile_summary(profile: Profile | None) -> dict | None:
         "resume_filename": os.path.basename(profile.base_resume_path)
         if profile.base_resume_path
         else "",
+    }
+
+
+def _candidate_profile_payload(row) -> dict:
+    candidate_data = row.pending_profile or row.approved_profile
+    return {
+        "status": row.status,
+        "candidate": Candidate.model_validate(candidate_data).model_dump(mode="json") if candidate_data else None,
+        "has_pending": bool(row.pending_profile),
+        "has_approved": bool(row.approved_profile),
+        "source_filename": row.source_filename,
+        "generated_at": row.generated_at.isoformat() if row.generated_at else None,
+        "approved_at": row.approved_at.isoformat() if row.approved_at else None,
     }
 
 
@@ -485,9 +525,7 @@ def setup_save(payload: SetupPayload) -> dict:
 
 @router.post("/setup/resume")
 async def setup_resume(resume: UploadFile = File(...)) -> dict:
-    """Upload + parse a résumé, upserting the Profile. Returns the refreshed
-    profile summary and answer bank so the form can repopulate."""
-    print("printing resume.filename", resume.filename)
+    """Upload and parse a resume into a pending, reviewable candidate profile."""
     from app.config import get_settings
     from app.resume.parse import parse_resume
 
@@ -501,7 +539,8 @@ async def setup_resume(resume: UploadFile = File(...)) -> dict:
     dest.write_bytes(contents)
     log.info("Resume uploaded via API: %s (%d KB) — parsing…", resume.filename, len(contents) // 1024)
     fields = parse_resume(dest) or {}
-    cv_bank = fields.pop("answer_bank", {})
+    candidate = candidate_from_resume_fields(fields)
+    cv_bank = fields.get("answer_bank", {})
     log.info(
         "Resume parsed: name=%r, %d skills, %d experience entries",
         fields.get("full_name") or "(none)",
@@ -510,17 +549,85 @@ async def setup_resume(resume: UploadFile = File(...)) -> dict:
     )
 
     with Session(engine) as session:
-        profile = session.exec(select(Profile)).first() or Profile()
-        existing = dict(profile.answer_bank or {})
-        for key, value in fields.items():
-            setattr(profile, key, value)
-        # Precedence: prior manual entries > CV-derived > defaults.
-        profile.answer_bank = {**DEFAULT_ANSWER_BANK, **cv_bank, **existing}
-        profile.updated_at = utcnow()
-        session.add(profile)
-        session.commit()
-        session.refresh(profile)
-        return {"profile": _profile_summary(profile), "answer_bank": dict(profile.answer_bank)}
+        review = ProfileReview(session)
+        row = review.stage(
+            candidate,
+            resume_path=str(fields.get("base_resume_path") or dest),
+            raw_text=str(fields.get("raw_text") or ""),
+            answer_bank={**DEFAULT_ANSWER_BANK, **cv_bank},
+        )
+        profile = session.exec(select(Profile)).first()
+        return {
+            "profile": _profile_summary(profile),
+            "answer_bank": _effective_bank(profile),
+            "candidate_profile": _candidate_profile_payload(row),
+        }
+
+
+class CandidateProfilePayload(BaseModel):
+    candidate: Candidate
+
+
+@router.get("/candidate-profile")
+def candidate_profile_get() -> dict:
+    """Return the pending interpretation, or the last approved profile."""
+    with Session(engine) as session:
+        review = ProfileReview(session)
+        row = review.get()
+        if row is None:
+            profile = session.exec(select(Profile)).first()
+            if profile is None or not (
+                profile.raw_text or profile.full_name or profile.first_name or profile.email
+                or profile.experience or profile.skills or profile.answer_bank
+            ):
+                return {
+                    "status": "missing", "candidate": None, "has_pending": False,
+                    "has_approved": False, "source_filename": "", "generated_at": None,
+                    "approved_at": None,
+                }
+            row = review.stage(
+                candidate_from_profile(profile),
+                resume_path=profile.base_resume_path,
+                raw_text=profile.raw_text,
+                answer_bank={},
+            )
+        return _candidate_profile_payload(row)
+
+
+@router.put("/candidate-profile")
+def candidate_profile_update(payload: CandidateProfilePayload) -> dict:
+    with Session(engine) as session:
+        try:
+            row = ProfileReview(session).update(payload.candidate)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _candidate_profile_payload(row)
+
+
+@router.post("/candidate-profile/approve")
+def candidate_profile_approve(payload: CandidateProfilePayload) -> dict:
+    """Save the final edits and promote them into the operational Profile."""
+    with Session(engine) as session:
+        review = ProfileReview(session)
+        try:
+            review.update(payload.candidate)
+            review.approve()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        row = review.get()
+        return _candidate_profile_payload(row)
+
+
+@router.delete("/candidate-profile/pending")
+def candidate_profile_discard() -> dict:
+    with Session(engine) as session:
+        review = ProfileReview(session)
+        try:
+            review.reject()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        row = review.get()
+        return _candidate_profile_payload(row)
 
 
 # --------------------------------------------------------------------------- #
@@ -545,29 +652,32 @@ def applications_list() -> dict:
         rows = session.exec(
             select(Application, Job).join(Job).order_by(Application.match_score.desc())
         ).all()
-        apps = [
-            {
-                "id": app.id,
-                "title": job.title,
-                "company": job.company,
-                "location": job.location,
-                "source": job.source,
-                "apply_url": job.apply_url,
-                "status": app.status,
-                "match_score": app.match_score,
-                "score_rationale": app.score_rationale,
-                "error": _error_of(app),
-                "has_resume": bool(app.resume_path),
-                "has_cover_letter": bool(app.cover_letter_path),
-                "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
-                "state": status_state(app.id, app.status),
-                "can_retry": app.status in (
-                    ApplicationStatus.failed.value, ApplicationStatus.needs_human.value
-                ),
-            }
-            for app, job in rows
-        ]
-    return {"applications": apps}
+    test_executions = Coordinator(engine).latest_many(app.id for app, _ in rows)
+    apps = [
+        {
+            "id": app.id,
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "source": job.source,
+            "apply_url": job.apply_url,
+            "status": app.status,
+            "match_score": app.match_score,
+            "score_rationale": app.score_rationale,
+            "error": _error_of(app),
+            "has_resume": bool(app.resume_path),
+            "has_cover_letter": bool(app.cover_letter_path),
+            "test_execution": test_executions.get(app.id),
+            "test_mode": get_settings().test_ats_enabled,
+            "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
+            "state": status_state(app.id, app.status),
+            "can_retry": app.status in (
+                ApplicationStatus.failed.value, ApplicationStatus.needs_human.value
+            ),
+        }
+        for app, job in rows
+    ]
+    return {"applications": apps, "test_mode": get_settings().test_ats_enabled}
 
 
 @router.post("/applications/tailor")
@@ -592,6 +702,8 @@ def applications_submit() -> dict:
     from app.pipeline.submit import submit_tailored
 
     log.info("Submit-tailored requested (POST /api/applications/submit)")
+    if get_settings().test_ats_enabled:
+        return {"ok": True, **execution_call(Coordinator(engine).bulk)}
     prefs = get_preferences()
     with Session(engine) as session:
         settings = effective_settings(session)
@@ -604,7 +716,7 @@ def applications_submit() -> dict:
     return {"ok": True, "dry_run": settings.dry_run, **result}
 
 
-@router.get("/applications/{app_id}/{artifact}")
+@router.get("/applications/{app_id}/artifacts/{artifact}")
 def download_artifact(app_id: int, artifact: str) -> FileResponse:
     log.debug("Artifact download: app %s, %s", app_id, artifact)
     if artifact not in ("resume", "cover_letter"):
@@ -667,11 +779,44 @@ def _answers_for(app: Application, job: Job, profile: Profile | None) -> list[di
             return preview.get("answers", []) or []
         except Exception as exc:  # noqa: BLE001
             log.warning("Assist re-plan failed (app %s): %s", app.id, exc)
-    return []
+    return _profile_assist_answers(profile) if profile is not None else []
 
 
-@router.post("/intervention/{app_id}/assist")
-def intervention_assist(app_id: int) -> dict:
+def _profile_assist_answers(profile: Profile) -> list[dict]:
+    """Build conservative, reusable field bindings from the approved profile.
+
+    These are facts already saved by the user or approved through Profile Review.
+    Narrative questions remain unfilled unless Candidate Brain produced a reviewed
+    application preview, so the generic fallback cannot invent candidate claims.
+    """
+    values: list[tuple[str, str, object]] = [
+        ("name", "Full name", profile.full_name),
+        ("first_name", "First name", profile.first_name),
+        ("middle_name", "Middle name", profile.middle_name),
+        ("last_name", "Last name", profile.last_name),
+        ("email", "Email", profile.email),
+        ("phone", "Phone", profile.phone),
+    ]
+    for key, value in (profile.answer_bank or {}).items():
+        values.append((str(key), str(key).replace("_", " "), value))
+
+    answers: list[dict] = []
+    seen: set[str] = set()
+    for name, label, value in values:
+        normalized = name.strip().lower()
+        if not normalized or normalized in seen or value is None or isinstance(value, (dict, list)):
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        seen.add(normalized)
+        answers.append({"name": name, "label": label, "type": "String", "answer": text})
+    return answers
+
+
+@router.post("/applications/{app_id}/assist")
+@router.post("/intervention/{app_id}/assist", include_in_schema=False)
+def application_assist(app_id: int) -> dict:
     """Enqueue the application in the managed assist browser (co-browse handoff).
 
     The live page is streamed over ``/ws/assist/{app_id}``; here we only plan the
@@ -688,12 +833,14 @@ def intervention_assist(app_id: int) -> dict:
         profile = session.exec(select(Profile)).first()
         apply_url = job.apply_url if job else ""
         answers = _answers_for(app, job, profile) if job else []
-        resume_path = app.resume_path
+        resume_path = app.resume_path or (profile.base_resume_path if profile else "")
     if not apply_url:
         raise HTTPException(status_code=400, detail="No apply URL for this job")
+    if urlparse(apply_url).scheme.lower() not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Apply URL must use HTTP or HTTPS")
     # Only enqueue if not already active/queued for this app (avoid double-add).
     stage = assist_session.snapshot(app_id).get("stage")
-    if stage not in ("queued", "opening", "live"):
+    if stage not in ("queued", "opening", "filling", "login_required", "live"):
         assist_session.enqueue(app_id, apply_url, answers, resume_path)
         log.info("Assist session enqueued for application %s (%d planned answers)", app_id, len(answers))
     else:
@@ -701,8 +848,9 @@ def intervention_assist(app_id: int) -> dict:
     return assist_session.snapshot(app_id)
 
 
-@router.get("/intervention/{app_id}/assist-status")
-def intervention_assist_status(app_id: int) -> dict:
+@router.get("/applications/{app_id}/assist-status")
+@router.get("/intervention/{app_id}/assist-status", include_in_schema=False)
+def application_assist_status(app_id: int) -> dict:
     from app.submit import assist_session
 
     return assist_session.snapshot(app_id)
@@ -711,6 +859,8 @@ def intervention_assist_status(app_id: int) -> dict:
 @router.post("/intervention/{app_id}/done")
 def intervention_done(app_id: int) -> dict:
     """Mark a needs-human application as manually submitted."""
+    if get_settings().test_ats_enabled:
+        raise HTTPException(status_code=409, detail="Local tests cannot be marked as real submissions")
     with Session(engine) as session:
         app = session.get(Application, app_id)
         if app is None:

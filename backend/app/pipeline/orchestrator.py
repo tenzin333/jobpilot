@@ -57,6 +57,15 @@ async def run_cycle(session: Session) -> Run:
         # 4. Submit.
         PIPELINE_STATE.set_stage("Submitting applications…")
         sub = submit_tailored(session, profile, prefs, settings)
+        if settings.test_ats_enabled:
+            PIPELINE_STATE.update_stats(**{k: v for k, v in sub.items() if isinstance(v, int)})
+            PIPELINE_STATE.log(f"Local tests: queued {sub['queued_test']}, active {sub['already_active']}, missing artifacts {sub['no_tailored']}, blocked {sub['blocked']}")
+            run.notes = f"Local test queue: {sub}"
+            run.finished_at = datetime.now(timezone.utc)
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            return run
         run.submitted = sub["submitted"]
         run.needs_human = sub["needs_human"]
         run.failed = sub["failed"]

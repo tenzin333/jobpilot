@@ -1,6 +1,5 @@
 """Shared helpers for search-aggregator connectors."""
 from __future__ import annotations
-
 import html
 import re
 
@@ -49,3 +48,9 @@ def relevant_title(title: str, include: list[str], exclude: list[str]) -> bool:
 
 def is_remote(*parts: str) -> bool:
     return "remote" in " ".join(parts).lower()
+
+
+def _scrape_sync(kwargs: dict):
+    from jobspy import scrape_jobs
+
+    return scrape_jobs(**kwargs)

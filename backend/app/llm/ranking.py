@@ -158,7 +158,7 @@ def prefilter(
         try:
             batch = parse_structured(
                 system=system, user=user, schema=BatchPrefilter,
-                tier="fast", cache_system=False, max_tokens=1000,
+                tier="fast", cache_system=False, max_tokens=256,
             )
             for item in batch.scores:
                 jid = refmap.get(item.ref)
@@ -186,7 +186,7 @@ def deep_score(job: Job, profile: Profile) -> MatchScore:
         user=_job_summary(job),
         schema=MatchScore,
         tier="fast",  # 8B model: fast + higher rate limit (quality tier kept for tailoring)
-        max_tokens=700,  # score + rationale + gaps; small output fits the 8B free-tier cap
+        max_tokens=256,  # score + rationale + gaps; small output fits the 8B free-tier cap
         cache_system=True,
     )
 
@@ -239,7 +239,7 @@ def deep_score_batch(
                 # covers the top `deep_keep` jobs in small batches, so the extra
                 # cost stays within free-tier limits. The prefilter stays on `fast`.
                 system=system, user=user, schema=BatchDeep,
-                tier="quality", cache_system=False, max_tokens=1500,
+                tier="quality", cache_system=False, max_tokens=256,
             )
         except Exception:  # noqa: BLE001 — skip a failed group, keep the prefilter score
             continue
